@@ -49,8 +49,7 @@ class TelethonEvent(AstrMessageEvent):
         for chunk in chunks:
             if not chunk.strip():
                 continue
-            sent = await self._send_text_with_action(chunk, reply_to)
-            reply_to = sent.id
+            await self._send_text_with_action(chunk, reply_to)
         return reply_to
 
     async def _send_media(
@@ -59,16 +58,16 @@ class TelethonEvent(AstrMessageEvent):
         caption: str | None,
         reply_to: int | None,
     ) -> int | None:
-        sent = await self.client.send_file(
-            self.peer,
-            file=path,
-            caption=caption,
-            reply_to=reply_to,
-        )
-        # Telethon sends a Message for single file; keep fallback for list returns.
-        if isinstance(sent, list):
-            return sent[-1].id if sent else reply_to
-        return sent.id
+        try:
+            await self.client.send_file(
+                self.peer,
+                file=path,
+                caption=caption,
+                reply_to=reply_to,
+            )
+        except Exception:
+            logger.exception("[Telethon] 发送媒体失败: path=%s", path)
+        return reply_to
 
     async def send(self, message: MessageChain):
         reply_to: int | None = None

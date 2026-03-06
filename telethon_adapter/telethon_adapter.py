@@ -179,6 +179,7 @@ class TelethonPlatformAdapter(Platform):
         self._cleanup_task: asyncio.Task | None = None
         self._media_group_cache: dict[tuple[str, int], dict[str, Any]] = {}
         self._recent_event_keys: dict[tuple[str, int], float] = {}
+        self._recent_event_keys_cleanup_at = 0.0
         self._downloaded_temp_files: dict[str, float] = {}
         self._media_temp_dir = self._build_media_temp_dir()
 
@@ -276,8 +277,8 @@ class TelethonPlatformAdapter(Platform):
         if self.client:
             try:
                 await self.client.disconnect()
-            except Exception as e:
-                logger.error(f"[Telethon] 关闭连接失败: {e}")
+            except Exception:
+                logger.exception("[Telethon] 关闭连接失败")
 
         if self._main_task and not self._main_task.done():
             self._main_task.cancel()
@@ -325,11 +326,13 @@ class TelethonPlatformAdapter(Platform):
         )
         loop = asyncio.get_running_loop()
         now = loop.time()
-        stale_keys = [
-            key for key, seen_at in self._recent_event_keys.items() if now - seen_at > 30
-        ]
-        for key in stale_keys:
-            self._recent_event_keys.pop(key, None)
+        if now >= self._recent_event_keys_cleanup_at:
+            stale_keys = [
+                key for key, seen_at in self._recent_event_keys.items() if now - seen_at > 30
+            ]
+            for key in stale_keys:
+                self._recent_event_keys.pop(key, None)
+            self._recent_event_keys_cleanup_at = now + 30
         if event_key in self._recent_event_keys:
             self._log_unprocessed("[Telethon] 忽略消息: duplicate event %s", event_key)
             return
@@ -367,8 +370,8 @@ class TelethonPlatformAdapter(Platform):
 
         try:
             abm = await self._convert_message(event, include_reply=True)
-        except Exception as e:
-            logger.error(f"[Telethon] 转换消息失败: {e}")
+        except Exception:
+            logger.exception("[Telethon] 转换消息失败")
             return
 
         logger.info(
@@ -471,15 +474,15 @@ class TelethonPlatformAdapter(Platform):
 
         try:
             merged = await self._convert_message(events_list[0], include_reply=True)
-        except Exception as e:
-            logger.error(f"[Telethon] 媒体组首条消息转换失败: {e}")
+        except Exception:
+            logger.exception("[Telethon] 媒体组首条消息转换失败")
             return
 
         for extra_event in events_list[1:]:
             try:
                 extra = await self._convert_message(extra_event, include_reply=False)
-            except Exception as e:
-                logger.warning(f"[Telethon] 媒体组子消息转换失败: {e}")
+            except Exception:
+                logger.exception("[Telethon] 媒体组子消息转换失败")
                 continue
 
             merged.message.extend(extra.message)
@@ -533,8 +536,8 @@ class TelethonPlatformAdapter(Platform):
             try:
                 if os.path.exists(path):
                     os.remove(path)
-            except Exception as e:
-                logger.warning(f"[Telethon] 清理临时媒体文件失败: {path} {e}")
+            except Exception:
+                logger.exception("[Telethon] 清理临时媒体文件失败: %s", path)
                 continue
             self._downloaded_temp_files.pop(path, None)
         if force or not self._downloaded_temp_files:
@@ -639,8 +642,8 @@ class TelethonPlatformAdapter(Platform):
                         text=reply_abm.message_str,
                         qq=reply_abm.sender.user_id,
                     )
-            except Exception as e:
-                logger.warning(f"[Telethon] 获取引用消息失败: {e}")
+            except Exception:
+                logger.exception("[Telethon] 获取引用消息失败")
             message.message.append(
                 reply_component
             )
