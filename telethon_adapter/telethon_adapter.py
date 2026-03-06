@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import os
 import re
+import tempfile
 from typing import Any
 
 from astrbot.api import logger
@@ -494,7 +495,7 @@ class TelethonPlatformAdapter(Platform):
         return self._media_temp_dir
 
     def _build_media_temp_dir(self) -> str:
-        base_dir = "/tmp"
+        base_dir = tempfile.gettempdir()
         if get_astrbot_temp_path:
             try:
                 base_dir = str(get_astrbot_temp_path())

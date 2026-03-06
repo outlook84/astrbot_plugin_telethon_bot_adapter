@@ -71,28 +71,31 @@ class LazyImage(Image):
 class LazyRecord(Record):
     _downloader: TelethonLazyMedia = PrivateAttr()
     _converted_path: str | None = PrivateAttr(default=None)
+    _conversion_lock: asyncio.Lock = PrivateAttr()
 
     def __init__(self, downloader: TelethonLazyMedia, **kwargs: Any) -> None:
         super().__init__(file="telethon-lazy://record", **kwargs)
         object.__setattr__(self, "_downloader", downloader)
+        object.__setattr__(self, "_conversion_lock", asyncio.Lock())
 
     async def convert_to_file_path(self) -> str:
         original_path = await self._downloader.ensure_downloaded()
-        converted_path = self._converted_path
-        if converted_path and os.path.exists(converted_path):
-            return converted_path
+        async with self._conversion_lock:
+            converted_path = self._converted_path
+            if converted_path and os.path.exists(converted_path):
+                return converted_path
 
-        if original_path.lower().endswith(".wav") or not convert_audio_to_wav:
-            return original_path
+            if original_path.lower().endswith(".wav") or not convert_audio_to_wav:
+                return original_path
 
-        wav_path = os.path.splitext(original_path)[0] + ".wav"
-        try:
-            converted = await convert_audio_to_wav(original_path, wav_path)
-            object.__setattr__(self, "_converted_path", converted)
-            return converted
-        except Exception as e:
-            logger.warning(f"[Telethon] 音频转 WAV 失败，回退原文件: {e}")
-            return original_path
+            wav_path = os.path.splitext(original_path)[0] + ".wav"
+            try:
+                converted = await convert_audio_to_wav(original_path, wav_path)
+                object.__setattr__(self, "_converted_path", converted)
+                return converted
+            except Exception as e:
+                logger.warning(f"[Telethon] 音频转 WAV 失败，回退原文件: {e}")
+                return original_path
 
 
 class LazyVideo(Video):
