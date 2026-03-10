@@ -174,6 +174,7 @@ class TelethonPlatformAdapter(Platform):
 
         self.client: TelegramClient | None = None
         self.self_id = ""
+        self.self_username = ""
         self._running = False
         self._main_task: asyncio.Task | None = None
         self._cleanup_task: asyncio.Task | None = None
@@ -186,7 +187,9 @@ class TelethonPlatformAdapter(Platform):
     def meta(self) -> PlatformMetadata:
         adapter_id = str(self.config.get("id") or "telethon_userbot")
         return PlatformMetadata(
-            name="Telethon_Userbot",
+            # AstrBot core uses platform_meta.name as the canonical adapter type
+            # for platform filters and compatibility checks.
+            name="telegram",
             description="Telethon Userbot 适配器",
             id=adapter_id,
         )
@@ -215,12 +218,14 @@ class TelethonPlatformAdapter(Platform):
 
             me = await self.client.get_me()
             self.self_id = str(me.id)
+            self.self_username = str(getattr(me, "username", "") or "").strip().lower()
 
             logger.info(
-                "[Telethon] Userbot 已启动: %s ignore_self_messages=%s "
+                "[Telethon] Userbot 已启动: %s username=%s ignore_self_messages=%s "
                 "download_incoming_media=%s incoming_media_ttl_seconds=%s "
                 "trigger_prefix=%r log_processed_messages_only=%s raw_config=%s",
                 self.self_id,
+                self.self_username,
                 self.ignore_self_messages,
                 self.download_incoming_media,
                 self.incoming_media_ttl_seconds,
@@ -350,21 +355,21 @@ class TelethonPlatformAdapter(Platform):
             self._log_unprocessed("[Telethon] 忽略消息: self message")
             return
 
-        raw_text = str(getattr(event.message, "raw_text", "") or "")
-        if self.trigger_prefix and not raw_text.startswith(self.trigger_prefix):
-            self._log_unprocessed(
-                "[Telethon] 忽略消息: missing trigger_prefix %r text=%r",
-                self.trigger_prefix,
-                raw_text,
-            )
-            return
-
         grouped_id = getattr(event.message, "grouped_id", None)
         if grouped_id:
             await self._handle_grouped_message(
                 event,
                 str(event.chat_id),
                 int(grouped_id),
+            )
+            return
+
+        raw_text = str(getattr(event.message, "raw_text", "") or "")
+        if self.trigger_prefix and not raw_text.startswith(self.trigger_prefix):
+            self._log_unprocessed(
+                "[Telethon] 忽略消息: missing trigger_prefix %r text=%r",
+                self.trigger_prefix,
+                raw_text,
             )
             return
 
@@ -472,13 +477,32 @@ class TelethonPlatformAdapter(Platform):
         grouped_id = cache_key[1]
         events_list = sorted(events_list, key=lambda e: int(getattr(e.message, "id", 0)))
 
+        trigger_event = None
+        if self.trigger_prefix:
+            for candidate in events_list:
+                raw_text = str(getattr(candidate.message, "raw_text", "") or "")
+                if raw_text.startswith(self.trigger_prefix):
+                    trigger_event = candidate
+                    break
+            if trigger_event is None:
+                self._log_unprocessed(
+                    "[Telethon] 忽略媒体组: missing trigger_prefix %r grouped_id=%s",
+                    self.trigger_prefix,
+                    grouped_id,
+                )
+                return
+        else:
+            trigger_event = events_list[0]
+
         try:
-            merged = await self._convert_message(events_list[0], include_reply=True)
+            merged = await self._convert_message(trigger_event, include_reply=True)
         except Exception:
             logger.exception("[Telethon] 媒体组首条消息转换失败")
             return
 
         for extra_event in events_list[1:]:
+            if extra_event is trigger_event:
+                continue
             try:
                 extra = await self._convert_message(extra_event, include_reply=False)
             except Exception:
@@ -594,19 +618,27 @@ class TelethonPlatformAdapter(Platform):
         message.sender = MessageMember(user_id=str(getattr(sender, "id", "0")), nickname=sender_name)
         message.message_str = msg.raw_text or ""
         message.message = []
-
+        trigger_prefix_matched = False
         if (
             strip_trigger_prefix
             and self.trigger_prefix
             and message.message_str.startswith(self.trigger_prefix)
         ):
             message.message_str = message.message_str[len(self.trigger_prefix) :].lstrip()
+            trigger_prefix_matched = True
 
         if is_private:
             message.type = MessageType.FRIEND_MESSAGE
         else:
             message.type = MessageType.GROUP_MESSAGE
             message.group_id = chat_id
+            if trigger_prefix_matched:
+                message.message.append(
+                    At(
+                        qq=self.self_id,
+                        name=self.self_username or self.self_id,
+                    )
+                )
 
         if include_reply and msg.reply_to and getattr(msg.reply_to, "reply_to_msg_id", None):
             reply_id = str(msg.reply_to.reply_to_msg_id)
@@ -793,12 +825,17 @@ class TelethonPlatformAdapter(Platform):
 
         return start_index, max(start_index, end_index)
 
-    @staticmethod
-    def _entity_to_at(entity: Any, entity_text: str) -> At | None:
+    def _entity_to_at(self, entity: Any, entity_text: str) -> At | None:
         cleaned = entity_text.strip()
         if isinstance(entity, MessageEntityMention):
             username = cleaned.lstrip("@")
             if username:
+                if (
+                    self.self_id
+                    and self.self_username
+                    and username.lower() == self.self_username
+                ):
+                    return At(qq=self.self_id, name=username)
                 return At(qq=username, name=username)
             return None
 

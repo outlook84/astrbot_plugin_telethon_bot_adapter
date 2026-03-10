@@ -202,3 +202,14 @@ class TelethonEvent(AstrMessageEvent):
             reply_to=reply_to,
             link_preview=False,
         )
+
+    async def react(self, emoji: str) -> None:
+        raw_message = getattr(self.message_obj, "raw_message", None)
+        react_method = getattr(raw_message, "react", None)
+        if callable(react_method):
+            try:
+                await react_method(emoji)
+                return
+            except Exception as e:
+                logger.warning(f"[Telethon] 原生 reaction 失败，回退普通消息: {e!s}")
+        await super().react(emoji)
