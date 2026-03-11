@@ -41,6 +41,7 @@ python3 ./astrbot_plugin_telethon_adapter/scripts/generate_session.py
 
 - Telegram 登录验证码
 - 二次验证密码（如果账号开启了 2FA）
+- 代理信息（可选；支持 `socks5`、`socks4`、`http`、`mtproto`）
 
 脚本最终会输出一段 `StringSession`，把它复制到 AstrBot 配置里的 `session_string` 即可。
 
@@ -59,6 +60,12 @@ python3 ./astrbot_plugin_telethon_adapter/scripts/generate_session.py
 - `telethon_media_group_timeout`: 媒体组聚合防抖延迟（秒，默认 `1.2`）
 - `telethon_media_group_max_wait`: 媒体组最大等待时间（秒，默认 `8.0`）
 - `telethon_userbot` 不支持平台级流式展示；如果 AstrBot 开启了 `provider_settings.streaming_response`，请将“不支持流式回复的平台”设置为“关闭流式回复”，不要使用“实时分段回复”。
+- `proxy_type`: 代理类型，支持 `socks5`、`socks4`、`http`、`mtproto`
+- `proxy_host`: 代理服务器地址
+- `proxy_port`: 代理端口
+- `proxy_username`: SOCKS/HTTP 代理用户名，可选
+- `proxy_password`: SOCKS/HTTP 代理密码，可选
+- `proxy_secret`: 仅 `mtproto` 代理需要填写
 
 ## 注意事项
 

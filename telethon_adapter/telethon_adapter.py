@@ -23,8 +23,13 @@ try:
     from astrbot.core.utils.astrbot_path import get_astrbot_temp_path
 except Exception:
     get_astrbot_temp_path = None
+try:
+    from python_socks import ProxyType
+except Exception:
+    ProxyType = None
 
 from telethon import TelegramClient, events
+from telethon.network import connection
 from telethon.sessions import StringSession
 from telethon.tl.types import (
     DocumentAttributeAudio,
@@ -100,6 +105,44 @@ TELETHON_CONFIG_METADATA = {
         "type": "float",
         "hint": "媒体组聚合的最长等待时间，单位秒。",
     },
+    "proxy_type": {
+        "description": "代理类型",
+        "type": "string",
+        "hint": "支持 socks5、socks4、http、mtproto。",
+        "options": ["", "socks5", "socks4", "http", "mtproto"],
+        "labels": ["直连", "SOCKS5", "SOCKS4", "HTTP", "MTProto"],
+    },
+    "proxy_host": {
+        "description": "代理主机",
+        "type": "string",
+        "hint": "代理服务器地址，例如 127.0.0.1。",
+    },
+    "proxy_port": {
+        "description": "代理端口",
+        "type": "int",
+        "hint": "代理端口，例如 1080。",
+    },
+    "proxy_username": {
+        "description": "代理用户名",
+        "type": "string",
+        "hint": "SOCKS/HTTP 代理可选用户名。",
+    },
+    "proxy_password": {
+        "description": "代理密码",
+        "type": "string",
+        "hint": "SOCKS/HTTP 代理可选密码。",
+    },
+    "proxy_rdns": {
+        "description": "代理远程 DNS",
+        "type": "bool",
+        "hint": "SOCKS/HTTP 代理是否通过代理端进行域名解析，默认开启。",
+        "invisible": True,
+    },
+    "proxy_secret": {
+        "description": "MTProto Secret",
+        "type": "string",
+        "hint": "仅 MTProto 代理需要填写 secret。",
+    },
 }
 
 
@@ -137,6 +180,12 @@ def _parse_bool(value: Any, default: bool) -> bool:
         "log_processed_messages_only": True,
         "telethon_media_group_timeout": 1.2,
         "telethon_media_group_max_wait": 8.0,
+        "proxy_type": "",
+        "proxy_host": "",
+        "proxy_port": 0,
+        "proxy_username": "",
+        "proxy_password": "",
+        "proxy_secret": "",
     },
     config_metadata=TELETHON_CONFIG_METADATA,
 )
@@ -172,6 +221,15 @@ class TelethonPlatformAdapter(Platform):
         self.media_group_max_wait = float(
             self.config.get("telethon_media_group_max_wait", 8.0)
         )
+        self.proxy_type = str(self.config.get("proxy_type", "") or "").strip().lower()
+        if self.proxy_type == "mtproxy":
+            self.proxy_type = "mtproto"
+        self.proxy_host = str(self.config.get("proxy_host", "") or "").strip()
+        self.proxy_port = int(self.config.get("proxy_port", 0) or 0)
+        self.proxy_username = str(self.config.get("proxy_username", "") or "").strip()
+        self.proxy_password = str(self.config.get("proxy_password", "") or "")
+        self.proxy_rdns = _parse_bool(self.config.get("proxy_rdns"), True)
+        self.proxy_secret = str(self.config.get("proxy_secret", "") or "").strip()
 
         self.client: TelegramClient | None = None
         self.self_id = ""
@@ -204,10 +262,12 @@ class TelethonPlatformAdapter(Platform):
                 "[Telethon] 缺少 session_string。请先生成 Telethon StringSession。"
             )
 
+        client_kwargs = self._build_client_kwargs()
         self.client = TelegramClient(
             StringSession(self.session_string),
             self.api_id,
             self.api_hash,
+            **client_kwargs,
         )
 
         try:
@@ -225,7 +285,8 @@ class TelethonPlatformAdapter(Platform):
             logger.info(
                 "[Telethon] Userbot 已启动: %s username=%s ignore_self_messages=%s "
                 "download_incoming_media=%s incoming_media_ttl_seconds=%s "
-                "trigger_prefix=%r log_processed_messages_only=%s raw_config=%s",
+                "trigger_prefix=%r log_processed_messages_only=%s proxy_type=%s "
+                "proxy_host=%s proxy_port=%s raw_config=%s",
                 self.self_id,
                 self.self_username,
                 self.ignore_self_messages,
@@ -233,6 +294,9 @@ class TelethonPlatformAdapter(Platform):
                 self.incoming_media_ttl_seconds,
                 self.trigger_prefix,
                 self.log_processed_messages_only,
+                self.proxy_type or "direct",
+                self.proxy_host or "",
+                self.proxy_port or 0,
                 {
                     "trigger_prefix": self.config.get("trigger_prefix"),
                     "ignore_self_messages": self.config.get("ignore_self_messages"),
@@ -243,6 +307,10 @@ class TelethonPlatformAdapter(Platform):
                     "log_processed_messages_only": self.config.get(
                         "log_processed_messages_only"
                     ),
+                    "proxy_type": self.config.get("proxy_type"),
+                    "proxy_host": self.config.get("proxy_host"),
+                    "proxy_port": self.config.get("proxy_port"),
+                    "proxy_rdns": self.config.get("proxy_rdns"),
                 },
             )
             self.client.add_event_handler(
@@ -315,6 +383,59 @@ class TelethonPlatformAdapter(Platform):
 
     def get_client(self):
         return self.client
+
+    def _build_client_kwargs(self) -> dict[str, Any]:
+        if not self.proxy_type:
+            return {}
+
+        if not self.proxy_host or not self.proxy_port:
+            raise ValueError("[Telethon] 已配置代理，但缺少 proxy_host 或 proxy_port")
+
+        if self.proxy_type in {"socks5", "socks4", "http"}:
+            if ProxyType is None:
+                raise RuntimeError(
+                    "[Telethon] 已配置 SOCKS/HTTP 代理，但缺少 python-socks 依赖"
+                )
+            proxy_type_map = {
+                "socks5": ProxyType.SOCKS5,
+                "socks4": ProxyType.SOCKS4,
+                "http": ProxyType.HTTP,
+            }
+            return {
+                "proxy": (
+                    proxy_type_map[self.proxy_type],
+                    self.proxy_host,
+                    self.proxy_port,
+                    self.proxy_rdns,
+                    self.proxy_username or None,
+                    self.proxy_password or None,
+                )
+            }
+
+        if self.proxy_type == "mtproto":
+            if not self.proxy_secret:
+                raise ValueError(
+                    "[Telethon] MTProto 代理需要配置 proxy_secret"
+                )
+            mtproto_connection = getattr(
+                connection, "ConnectionTcpMTProxyRandomizedIntermediate", None
+            ) or getattr(connection, "ConnectionTcpMTProxyIntermediate", None)
+            if mtproto_connection is None:
+                raise RuntimeError(
+                    "[Telethon] 当前 Telethon 版本未提供 MTProto 代理连接类"
+                )
+            return {
+                "connection": mtproto_connection,
+                "proxy": (
+                    self.proxy_host,
+                    self.proxy_port,
+                    self.proxy_secret,
+                ),
+            }
+
+        raise ValueError(
+            "[Telethon] 不支持的 proxy_type。可选值: socks5, socks4, http, mtproto"
+        )
 
     def _log_unprocessed(self, message: str, *args: Any) -> None:
         if not self.log_processed_messages_only:
