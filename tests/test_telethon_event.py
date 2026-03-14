@@ -400,6 +400,19 @@ class TelethonEventTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(module.TelethonEvent._format_at_text(At(qq="123456", name="Alice")), "@Alice ")
         self.assertEqual(module.TelethonEvent._format_at_text(At(qq="@bob", name="Bob")), "@bob ")
 
+    def test_format_at_html_uses_clickable_links_when_possible(self):
+        module = _load_telethon_event_module()
+        At = sys.modules["astrbot.api.message_components"].At
+
+        self.assertEqual(
+            module.TelethonEvent._format_at_html(At(qq="123456", name="Alice")),
+            '<a href="tg://user?id=123456">@Alice</a> ',
+        )
+        self.assertEqual(
+            module.TelethonEvent._format_at_html(At(qq="@bob", name="Bob")),
+            '<a href="https://t.me/bob">@bob</a> ',
+        )
+
     async def test_send_splits_long_plain_text_and_preserves_reply_to(self):
         module = _load_telethon_event_module()
         client = _FakeClient()
@@ -428,6 +441,32 @@ class TelethonEventTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(client.sent_messages[0][2]["reply_to"], 77)
         self.assertEqual(client.sent_messages[1][2]["reply_to"], 77)
         self.assertEqual("".join(text for _, text, _ in client.sent_messages), long_text)
+
+    async def test_send_uses_html_for_clickable_at_mentions(self):
+        module = _load_telethon_event_module()
+        client = _FakeClient()
+        event = module.TelethonEvent("", object(), object(), "123", client)
+        at_type = sys.modules["astrbot.api.message_components"].At
+        plain_type = sys.modules["astrbot.api.message_components"].Plain
+        chain_type = sys.modules["astrbot.api.event"].MessageChain
+
+        await event.send(
+            chain_type(
+                [
+                    at_type(qq="123456", name="Alice"),
+                    plain_type(text=" hello <world>"),
+                ]
+            )
+        )
+
+        self.assertEqual(len(client.sent_messages), 1)
+        peer, text, kwargs = client.sent_messages[0]
+        self.assertEqual(peer, 123)
+        self.assertEqual(
+            text,
+            '<a href="tg://user?id=123456">@Alice</a>  hello &lt;world&gt;',
+        )
+        self.assertEqual(kwargs["parse_mode"], "html")
 
 
 if __name__ == "__main__":

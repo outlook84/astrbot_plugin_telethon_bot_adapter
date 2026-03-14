@@ -111,14 +111,15 @@ class TelethonEvent(AstrMessageEvent):
         yield
 
     async def _flush_text(
-        self, text_parts: list[str], reply_to: int | None
+        self, text_parts: list[tuple[str, bool]], reply_to: int | None
     ) -> int | None:
         if not text_parts:
             return reply_to
         chunks = self._pack_text_chunks(text_parts)
         text_parts.clear()
         for chunk in chunks:
-            if not chunk.strip():
+            rendered = self._render_text_chunk(chunk)
+            if not rendered.strip():
                 continue
             await self._send_text_with_action(chunk, reply_to)
         return reply_to
@@ -157,7 +158,7 @@ class TelethonEvent(AstrMessageEvent):
 
     async def send(self, message: MessageChain):
         reply_to: int | None = None
-        text_parts: list[str] = []
+        text_parts: list[tuple[str, bool]] = []
 
         for item in message.chain:
             if isinstance(item, Reply):
@@ -168,16 +169,20 @@ class TelethonEvent(AstrMessageEvent):
                 continue
 
             if isinstance(item, At):
-                text_parts.append(self._format_at_text(item))
+                at_html = self._format_at_html(item)
+                if at_html:
+                    text_parts.append((at_html, True))
+                else:
+                    text_parts.append((self._format_at_text(item), False))
                 continue
 
             if isinstance(item, Plain):
-                text_parts.append(item.text)
+                text_parts.append((item.text, False))
                 continue
 
             if isinstance(item, Location):
                 text_parts.append(
-                    f"[位置] {item.lat},{item.lon} {item.title or ''}".strip()
+                    (f"[位置] {item.lat},{item.lon} {item.title or ''}".strip(), False)
                 )
                 continue
 
@@ -248,6 +253,31 @@ class TelethonEvent(AstrMessageEvent):
         return f"@{qq_str} "
 
     @classmethod
+    def _format_at_html(cls, item: At) -> str | None:
+        qq_str = str(item.qq).strip()
+        display = cls._format_at_text(item).strip()
+        if qq_str.isdigit():
+            href = f"tg://user?id={qq_str}"
+            return f'<a href="{href}">{html.escape(display)}</a> '
+
+        username = ""
+        if qq_str.startswith("@"):
+            username = qq_str[1:]
+        elif qq_str and " " not in qq_str:
+            username = qq_str
+        else:
+            raw_name = str(item.name or "").strip()
+            if raw_name.startswith("@"):
+                username = raw_name[1:]
+            elif raw_name and " " not in raw_name:
+                username = raw_name
+
+        if not username:
+            return None
+        href = f"https://t.me/{html.escape(username, quote=True)}"
+        return f'<a href="{href}">{html.escape(display)}</a> '
+
+    @classmethod
     def _split_message(cls, text: str) -> list[str]:
         if len(text) <= cls.MAX_MESSAGE_LENGTH:
             return [text]
@@ -268,30 +298,44 @@ class TelethonEvent(AstrMessageEvent):
             text = text[split_point:].lstrip()
         return chunks
 
-    def _pack_text_chunks(self, text_parts: list[str]) -> list[str]:
-        packed: list[str] = []
-        current = ""
+    def _pack_text_chunks(
+        self, text_parts: list[tuple[str, bool]]
+    ) -> list[list[tuple[str, bool]]]:
+        packed: list[list[tuple[str, bool]]] = []
+        current: list[tuple[str, bool]] = []
+        current_length = 0
 
         def flush_current():
             nonlocal current
+            nonlocal current_length
             if current:
                 packed.append(current)
-                current = ""
+                current = []
+                current_length = 0
 
-        for part in text_parts:
+        for part, is_html in text_parts:
             if not part:
                 continue
-            if len(part) > self.MAX_MESSAGE_LENGTH:
+            if not is_html and len(part) > self.MAX_MESSAGE_LENGTH:
                 flush_current()
-                packed.extend(self._split_message(part))
+                packed.extend([[(chunk, False)] for chunk in self._split_message(part)])
                 continue
-            if len(current) + len(part) <= self.MAX_MESSAGE_LENGTH:
-                current += part
+            if current_length + len(part) <= self.MAX_MESSAGE_LENGTH:
+                current.append((part, is_html))
+                current_length += len(part)
             else:
                 flush_current()
-                current = part
+                current = [(part, is_html)]
+                current_length = len(part)
         flush_current()
         return packed
+
+    @staticmethod
+    def _render_text_chunk(text_parts: list[tuple[str, bool]]) -> str:
+        return "".join(
+            part if is_html else html.escape(part)
+            for part, is_html in text_parts
+        )
 
     @classmethod
     def _looks_like_markdown(cls, text: str) -> bool:
@@ -404,12 +448,24 @@ class TelethonEvent(AstrMessageEvent):
         result = re.sub(r"\n{3,}", "\n\n", result)
         return result.strip()
 
-    async def _send_text_with_action(self, text: str, reply_to: int | None):
+    async def _send_text_with_action(
+        self, text: str | list[tuple[str, bool]], reply_to: int | None
+    ):
         await self.send_typing()
         payload = {
             "reply_to": reply_to,
             "link_preview": False,
         }
+        if isinstance(text, list):
+            formatted_text = self._render_text_chunk(text)
+            if any(is_html for _, is_html in text):
+                return await self.client.send_message(
+                    self.peer,
+                    formatted_text,
+                    parse_mode="html",
+                    **payload,
+                )
+            text = "".join(part for part, _ in text)
         if not self._looks_like_markdown(text):
             return await self.client.send_message(
                 self.peer,
