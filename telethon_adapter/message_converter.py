@@ -70,35 +70,29 @@ class TelethonMessageConverter:
         message = AstrBotMessage()
         message.session_id = chat_id
         message.message_id = str(msg.id)
-        message.self_id = self.adapter.self_id
+        message.self_id = self.adapter.self_username or self.adapter.self_id
         message.raw_message = msg
         message.sender = MessageMember(
             user_id=str(getattr(sender, "id", "0")),
             nickname=sender_name,
         )
-        message.message_str = msg.raw_text or ""
+        message.message_str = self.strip_self_mentions_from_text(
+            msg.raw_text or "",
+            getattr(msg, "entities", None),
+        )
         message.message = []
-        trigger_prefix_matched = False
         if (
             strip_trigger_prefix
             and self.adapter.trigger_prefix
             and message.message_str.startswith(self.adapter.trigger_prefix)
         ):
             message.message_str = message.message_str[len(self.adapter.trigger_prefix) :].lstrip()
-            trigger_prefix_matched = True
 
         if is_private:
             message.type = MessageType.FRIEND_MESSAGE
         else:
             message.type = MessageType.GROUP_MESSAGE
             message.group_id = chat_id
-            if trigger_prefix_matched:
-                message.message.append(
-                    At(
-                        qq=self.adapter.self_id,
-                        name=self.adapter.self_username or self.adapter.self_id,
-                    )
-                )
 
         if include_reply and msg.reply_to and getattr(msg.reply_to, "reply_to_msg_id", None):
             reply_id = str(msg.reply_to.reply_to_msg_id)
@@ -213,6 +207,61 @@ class TelethonMessageConverter:
             if not isinstance(component, Plain) or component.text
         ]
 
+    def strip_self_mentions_from_text(
+        self,
+        text: str,
+        entities: list[Any] | None,
+    ) -> str:
+        if not text or not entities:
+            return text
+
+        spans_to_remove: list[tuple[int, int]] = []
+        for entity in entities:
+            offset = int(getattr(entity, "offset", 0))
+            length = int(getattr(entity, "length", 0))
+            if length <= 0:
+                continue
+            py_offset, py_end = self.utf16_span_to_py_span(text, max(0, offset), length)
+            if py_end <= py_offset:
+                continue
+            entity_text = text[py_offset:py_end]
+            if self.is_self_mention(entity, entity_text):
+                spans_to_remove.append((py_offset, py_end))
+
+        if not spans_to_remove:
+            return text
+
+        parts: list[str] = []
+        cursor = 0
+        for start, end in sorted(spans_to_remove):
+            if start < cursor:
+                continue
+            if start > cursor:
+                parts.append(text[cursor:start])
+            cursor = end
+        if cursor < len(text):
+            parts.append(text[cursor:])
+        return "".join(parts)
+
+    def is_self_mention(self, entity: Any, entity_text: str) -> bool:
+        username = str(getattr(self.adapter, "self_username", "") or "").strip().lower()
+        self_id = str(getattr(self.adapter, "self_id", "") or "").strip()
+        cleaned = entity_text.strip().lstrip("@").lower()
+
+        if isinstance(entity, MessageEntityMention):
+            return bool(username and cleaned == username)
+
+        if isinstance(entity, MessageEntityMentionName):
+            user_id = str(getattr(entity, "user_id", "") or "").strip()
+            return bool(self_id and user_id == self_id)
+
+        if isinstance(entity, MessageEntityTextUrl):
+            url = str(getattr(entity, "url", "") or "")
+            match = re.search(r"tg://user\?id=(\d+)", url)
+            return bool(match and self_id and match.group(1) == self_id)
+
+        return False
+
     def parse_text_components(
         self,
         text: str,
@@ -309,29 +358,23 @@ class TelethonMessageConverter:
         if isinstance(entity, MessageEntityMention):
             username = cleaned.lstrip("@")
             if username:
-                if (
-                    self.adapter.self_id
-                    and self.adapter.self_username
-                    and username.lower() == self.adapter.self_username
-                ):
-                    return At(qq=self.adapter.self_id, name=username)
                 return At(qq=username, name=username)
             return None
 
         if isinstance(entity, MessageEntityMentionName):
-            user_id = str(getattr(entity, "user_id", "")).strip()
-            if user_id:
-                display = cleaned.lstrip("@") or user_id
-                return At(qq=user_id, name=display)
+            display = cleaned.lstrip("@").strip()
+            if display:
+                return At(qq=display, name=display)
             return None
 
         if isinstance(entity, MessageEntityTextUrl):
             url = str(getattr(entity, "url", "") or "")
             match = re.search(r"tg://user\?id=(\d+)", url)
             if match:
-                user_id = match.group(1)
-                display = cleaned.lstrip("@") or user_id
-                return At(qq=user_id, name=display)
+                display = cleaned.lstrip("@").strip()
+                if not display:
+                    return None
+                return At(qq=display, name=display)
         return None
 
     async def parse_media_components(self, msg: Any) -> list[Any]:
