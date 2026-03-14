@@ -29,11 +29,6 @@ TELETHON_CONFIG_METADATA = {
         "type": "string",
         "hint": "仅处理以此前缀开头的消息。留空表示处理所有消息。",
     },
-    "ignore_self_messages": {
-        "description": "忽略自身发送者消息",
-        "type": "bool",
-        "hint": "开启后，不处理 sender_id 等于当前账号 ID 的消息。",
-    },
     "download_incoming_media": {
         "description": "下载入站媒体",
         "type": "bool",
@@ -105,7 +100,6 @@ DEFAULT_CONFIG_TEMPLATE = {
     "session_string": "",
     "id": "telethon_userbot",
     "trigger_prefix": "-astr",
-    "ignore_self_messages": False,
     "download_incoming_media": True,
     "incoming_media_ttl_seconds": 600.0,
     "log_processed_messages_only": True,
@@ -195,9 +189,6 @@ def apply_config(adapter: Any) -> None:
     adapter.api_hash = parse_str(adapter.config.get("api_hash"), "")
     adapter.session_string = parse_str(adapter.config.get("session_string"), "")
     adapter.trigger_prefix = parse_str(adapter.config.get("trigger_prefix"), "")
-    adapter.ignore_self_messages = parse_bool(
-        adapter.config.get("ignore_self_messages"), False
-    )
     adapter.download_incoming_media = parse_bool(
         adapter.config.get("download_incoming_media"), True
     )
@@ -258,7 +249,6 @@ def validate_config(adapter: Any) -> None:
             adapter.config.get("proxy_type"),
             "请从 '', socks5, socks4, http, mtproto 中选择一个值。",
         )
-
     if adapter.proxy_type:
         if not adapter.proxy_host:
             raise config_error(

@@ -110,13 +110,12 @@ class TelethonPlatformAdapter(Platform):
             self.self_username = str(getattr(me, "username", "") or "").strip().lower()
 
             logger.info(
-                "[Telethon] Userbot 已启动: %s username=%s ignore_self_messages=%s "
+                "[Telethon] Userbot 已启动: %s username=%s "
                 "download_incoming_media=%s incoming_media_ttl_seconds=%s "
                 "trigger_prefix=%r log_processed_messages_only=%s proxy_type=%s "
                 "proxy_host=%s proxy_port=%s raw_config=%s",
                 self.self_id,
                 self.self_username,
-                self.ignore_self_messages,
                 self.download_incoming_media,
                 self.incoming_media_ttl_seconds,
                 self.trigger_prefix,
@@ -126,7 +125,6 @@ class TelethonPlatformAdapter(Platform):
                 self.proxy_port or 0,
                 {
                     "trigger_prefix": self.config.get("trigger_prefix"),
-                    "ignore_self_messages": self.config.get("ignore_self_messages"),
                     "download_incoming_media": self.config.get("download_incoming_media"),
                     "incoming_media_ttl_seconds": self.config.get(
                         "incoming_media_ttl_seconds"
@@ -307,10 +305,6 @@ class TelethonPlatformAdapter(Platform):
             getattr(event, "is_private", None),
             getattr(event.message, "raw_text", "") if getattr(event, "message", None) else "",
         )
-        if self.ignore_self_messages and str(getattr(event, "sender_id", "")) == self.self_id:
-            self._log_unprocessed("[Telethon] 忽略消息: self message")
-            return
-
         grouped_id = getattr(event.message, "grouped_id", None)
         if grouped_id:
             await self._handle_grouped_message(

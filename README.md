@@ -2,6 +2,8 @@
 
 为 AstrBot 增加基于 Telethon 的 Telegram Userbot 适配器。
 
+> 重要：建议始终配合 AstrBot 的会话白名单使用本插件。如果未配置白名单，存在与其它 Bot 之间互相回复、形成消息循环的风险。
+
 ## 功能
 
 - 使用用户账户接收 Telegram 消息并回发文本与图片消息
@@ -54,8 +56,7 @@ python3 ./astrbot_plugin_telethon_adapter/scripts/generate_session.py
 - `api_id`: Telegram API ID（整数）
 - `api_hash`: Telegram API Hash
 - `session_string`: 上一步得到的 StringSession
-- `trigger_prefix`: 触发前缀，默认是 `-astr`
-- `ignore_self_messages`: 是否忽略 sender 为自己账号的消息，默认关闭。
+- `trigger_prefix`: 触发前缀，默认是 `-astr`。此为消息入口过滤前缀，用于减少无关消息日志和后续 AstrBot 管线调用；在本插件场景下可替代唤醒词使用。
 - `download_incoming_media`: 是否下载收到的媒体文件（建议 `true`）
 - `telethon_media_group_timeout`: 媒体组聚合防抖延迟（秒，默认 `1.2`）
 - `telethon_media_group_max_wait`: 媒体组最大等待时间（秒，默认 `8.0`）

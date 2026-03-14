@@ -32,11 +32,17 @@ class TelethonMessageConverter:
         event: Any,
         include_reply: bool = True,
     ) -> AstrBotMessage:
+        is_private = bool(getattr(event, "is_private", False))
+        if not is_private:
+            message = getattr(event, "message", None)
+            peer = getattr(message, "peer_id", None)
+            if type(peer).__name__ == "PeerUser":
+                is_private = True
         return await self.convert_telethon_message(
             msg=event.message,
             sender=await event.get_sender(),
             chat_id=str(event.chat_id),
-            is_private=bool(getattr(event, "is_private", False)),
+            is_private=is_private,
             include_reply=include_reply,
             strip_trigger_prefix=True,
         )

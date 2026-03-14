@@ -61,7 +61,7 @@ def _install_astrbot_stubs() -> None:
     class AstrBotMessage:
         pass
 
-    class MessageMember:
+    class MessageMember(_BaseComponent):
         pass
 
     class MessageType:
@@ -241,6 +241,33 @@ def _load_adapter_module():
     return module
 
 
+def _load_message_converter_module():
+    _install_astrbot_stubs()
+    _install_pydantic_stubs()
+    _install_telethon_stubs()
+    package_module = types.ModuleType("telethon_adapter")
+    package_module.__path__ = [str(Path(__file__).resolve().parents[1] / "telethon_adapter")]
+    sys.modules["telethon_adapter"] = package_module
+
+    lazy_media_module = types.ModuleType("telethon_adapter.lazy_media")
+    lazy_media_module.LazyFile = type("LazyFile", (), {})
+    lazy_media_module.LazyImage = type("LazyImage", (), {})
+    lazy_media_module.LazyRecord = type("LazyRecord", (), {})
+    lazy_media_module.LazyVideo = type("LazyVideo", (), {})
+    lazy_media_module.TelethonLazyMedia = type("TelethonLazyMedia", (), {})
+    sys.modules["telethon_adapter.lazy_media"] = lazy_media_module
+
+    module_path = Path(__file__).resolve().parents[1] / "telethon_adapter" / "message_converter.py"
+    spec = importlib.util.spec_from_file_location(
+        "telethon_adapter.message_converter",
+        module_path,
+    )
+    module = importlib.util.module_from_spec(spec)
+    assert spec and spec.loader
+    spec.loader.exec_module(module)
+    return module
+
+
 class ConfigValidationTests(unittest.TestCase):
     def test_init_tolerates_dirty_numeric_config(self):
         module = _load_adapter_module()
@@ -397,6 +424,56 @@ class ConfigValidationTests(unittest.TestCase):
 
 
 class AdapterBehaviorTests(unittest.IsolatedAsyncioTestCase):
+    async def test_on_new_message_allows_group_bot_sender_by_default(self):
+        module = _load_adapter_module()
+        adapter = module.TelethonPlatformAdapter(
+            {
+                "api_id": 123,
+                "api_hash": "hash",
+                "session_string": "session",
+                "trigger_prefix": "-astr",
+            },
+            {},
+            asyncio.Queue(),
+        )
+        adapter._running = True
+        converted = []
+        committed = []
+
+        async def fake_convert_message(event, include_reply=True):
+            converted.append((event.message.id, include_reply))
+            return types.SimpleNamespace(
+                message_id=str(event.message.id),
+                message_str=event.message.raw_text,
+                message=[],
+                sender=types.SimpleNamespace(user_id="777", nickname="bot"),
+                session_id=str(event.chat_id),
+                type="group",
+            )
+
+        class _Event:
+            def __init__(self):
+                self.chat_id = "100"
+                self.sender_id = "777"
+                self.is_private = False
+                self.message = types.SimpleNamespace(
+                    id=10,
+                    raw_text="-astr hello",
+                    grouped_id=None,
+                    out=False,
+                )
+
+            async def get_sender(self):
+                return types.SimpleNamespace(id=777, bot=True)
+
+        adapter._convert_message = fake_convert_message
+        adapter._commit_abm = committed.append
+
+        await adapter._on_new_message(_Event())
+
+        self.assertEqual(converted, [(10, True)])
+        self.assertEqual(len(committed), 1)
+
     async def test_process_grouped_message_merges_items_and_uses_prefixed_trigger(self):
         module = _load_adapter_module()
         adapter = module.TelethonPlatformAdapter(
@@ -452,6 +529,36 @@ class AdapterBehaviorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(committed), 1)
         self.assertEqual(committed[0].message_str, "caption")
         self.assertEqual(committed[0].message, ["head", "part-10"])
+
+    async def test_message_converter_peer_user_fallback_sets_friend_message_type(self):
+        module = _load_message_converter_module()
+        adapter = types.SimpleNamespace(trigger_prefix="-astr", self_id="", self_username="")
+        converter = module.TelethonMessageConverter(adapter)
+
+        class _Event:
+            def __init__(self):
+                self.chat_id = "42"
+                self.is_private = False
+                self.message = types.SimpleNamespace(
+                    id=14,
+                    raw_text="hello",
+                    reply_to=None,
+                    media=None,
+                    entities=None,
+                )
+
+            async def get_sender(self):
+                return types.SimpleNamespace(id=42, username="alice")
+
+        event = _Event()
+        event.message.peer_id = type("PeerUser", (), {})()
+
+        abm = await converter.convert_message(event, include_reply=True)
+
+        self.assertEqual(abm.type, "friend")
+        self.assertEqual(abm.session_id, "42")
+        self.assertFalse(hasattr(abm, "group_id"))
+
 
     async def test_cleanup_expired_temp_files_removes_expired_entries_and_empty_dir(self):
         module = _load_adapter_module()
