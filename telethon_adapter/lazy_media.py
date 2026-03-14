@@ -34,6 +34,9 @@ class TelethonLazyMedia:
         self._downloaded_path: str | None = None
         self._lock = asyncio.Lock()
 
+    def register_temp_file(self, path: str) -> None:
+        self._register_temp_file(path)
+
     async def ensure_downloaded(self) -> str:
         async with self._lock:
             if self._downloaded_path and os.path.exists(self._downloaded_path):
@@ -53,7 +56,7 @@ class TelethonLazyMedia:
                 target = str(downloaded)
 
             self._downloaded_path = os.path.abspath(target)
-            self._register_temp_file(self._downloaded_path)
+            self.register_temp_file(self._downloaded_path)
             return self._downloaded_path
 
 
@@ -91,6 +94,9 @@ class LazyRecord(Record):
             wav_path = os.path.splitext(original_path)[0] + ".wav"
             try:
                 converted = await convert_audio_to_wav(original_path, wav_path)
+                converted = os.path.abspath(converted)
+                if converted != os.path.abspath(original_path):
+                    self._downloader.register_temp_file(converted)
                 object.__setattr__(self, "_converted_path", converted)
                 return converted
             except Exception as e:
