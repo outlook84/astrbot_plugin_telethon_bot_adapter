@@ -20,6 +20,7 @@
 - `session_string` 具备 Telegram 账号完全权限，请妥善保管。
 - 如果 `session_string` 失效，需要重新生成并更新配置。
 - `telethon_userbot` 不支持平台级流式展示；如果 AstrBot 开启了 `provider_settings.streaming_response`，请将“不支持流式回复的平台”设置为“关闭流式回复”，不要使用“实时分段回复”。
+- 当前仓库已将运行时平台类型和插件元数据统一为 `telethon_userbot`。在 AstrBot 上游尚未合并对应平台类型前，`@platform_adapter_type("telegram")`、`platform_specific.telegram.*` 和基于 `support_platforms` 的既有 Telegram 语义不会自动命中该适配器。
 - 批量删消息属于高风险操作。当前实现默认启用保守限制：所有 `prune` 命令单次最多删除 `200` 条；`selfprune` / `youprune` 最多向前扫描 `1000` 条历史；每 `100` 条删除批次之间增加节流。
 - 删除权限、服务消息限制与 `FloodWait` 由 Telegram/Telethon 决定；即使命令参数正确，也可能因为会话权限或风控而部分成功或失败。
 

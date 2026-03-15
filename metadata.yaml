@@ -5,4 +5,4 @@ author: outlook84
 repo: https://github.com/outlook84/astrbot_plugin_telethon_adapter
 display_name: Telegram Userbot Adapter
 support_platforms:
-  - telegram
+  - telethon_userbot

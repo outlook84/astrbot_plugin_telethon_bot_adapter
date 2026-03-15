@@ -172,7 +172,7 @@ class TelethonProfileServiceTest(unittest.IsolatedAsyncioTestCase):
         service = TelethonProfileService()
         event = types.SimpleNamespace(
             client=object(),
-            platform_meta=types.SimpleNamespace(name="telegram"),
+            platform_meta=types.SimpleNamespace(name="telethon_userbot"),
             message_obj=types.SimpleNamespace(raw_message=types.SimpleNamespace(peer_id=123)),
         )
 
@@ -182,7 +182,7 @@ class TelethonProfileServiceTest(unittest.IsolatedAsyncioTestCase):
         service = TelethonProfileService()
         event = types.SimpleNamespace(
             client=None,
-            platform_meta=types.SimpleNamespace(name="telegram"),
+            platform_meta=types.SimpleNamespace(name="telethon_userbot"),
             message_obj=types.SimpleNamespace(raw_message=None),
         )
 

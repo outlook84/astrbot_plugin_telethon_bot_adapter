@@ -80,7 +80,7 @@ class TelethonPlatformAdapter(Platform):
         return PlatformMetadata(
             # AstrBot core uses platform_meta.name as the canonical adapter type
             # for platform filters and compatibility checks.
-            name="telegram",
+            name="telethon_userbot",
             description="Telethon Userbot 适配器",
             id=adapter_id,
             support_streaming_message=False,

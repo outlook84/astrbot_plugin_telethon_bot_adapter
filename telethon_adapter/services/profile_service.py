@@ -53,7 +53,7 @@ class TelethonProfileService:
         platform_name = str(getattr(getattr(event, "platform_meta", None), "name", "") or "")
         raw_message = getattr(getattr(event, "message_obj", None), "raw_message", None)
         result = False
-        if platform_name == "telegram" and raw_message is not None:
+        if platform_name == "telethon_userbot" and raw_message is not None:
             result = True
         elif raw_message is not None and raw_message.__class__.__module__.startswith("telethon"):
             result = True
