@@ -31,6 +31,7 @@ class TelethonAdapterPlugin(Star):
         self._sender = TelethonSender()
 
     @filter.command_group("tg")
+    @filter.permission_type(filter.PermissionType.ADMIN)
     def tg(self) -> None:
         """Telethon 扩展命令。"""
 
