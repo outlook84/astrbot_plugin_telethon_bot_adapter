@@ -33,9 +33,9 @@ class TelethonMessageConverter:
         include_reply: bool = True,
     ) -> AstrBotMessage:
         is_private = bool(getattr(event, "is_private", False))
+        message = getattr(event, "message", None)
+        peer = getattr(message, "peer_id", None)
         if not is_private:
-            message = getattr(event, "message", None)
-            peer = getattr(message, "peer_id", None)
             if type(peer).__name__ == "PeerUser":
                 is_private = True
         return await self.convert_telethon_message(
@@ -44,7 +44,7 @@ class TelethonMessageConverter:
             chat_id=str(event.chat_id),
             is_private=is_private,
             include_reply=include_reply,
-            strip_trigger_prefix=not is_private,
+            strip_trigger_prefix=True,
         )
 
     async def convert_telethon_message(
@@ -89,15 +89,14 @@ class TelethonMessageConverter:
 
         inject_self_at = False
         if (
-            not is_private
-            and strip_trigger_prefix
+            strip_trigger_prefix
             and self.adapter.trigger_prefix
             and message.message_str.startswith(self.adapter.trigger_prefix)
         ):
             message.message_str = message.message_str[
                 len(self.adapter.trigger_prefix) :
             ].lstrip()
-            inject_self_at = True
+            inject_self_at = not is_private
 
         if include_reply and msg.reply_to and getattr(msg.reply_to, "reply_to_msg_id", None):
             reply_id = str(msg.reply_to.reply_to_msg_id)

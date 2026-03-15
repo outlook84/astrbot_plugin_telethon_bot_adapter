@@ -272,6 +272,25 @@ class MessageConverterTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(type(result.message[1]).__name__, "Plain")
         self.assertEqual(result.message[1].text, "hello world")
 
+    async def test_convert_private_message_strips_trigger_prefix_without_injecting_at(self):
+        module = _load_message_converter_module()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            converter = module.TelethonMessageConverter(_FakeAdapter(temp_dir))
+            event = _FakeEvent(
+                _FakeMessage(1, raw_text="-astr tg status"),
+                _FakeSender(123, username="alice"),
+                is_private=True,
+            )
+
+            result = await converter.convert_message(event)
+
+        self.assertEqual(result.message_str, "tg status")
+        self.assertEqual(result.type, "friend")
+        self.assertEqual(len(result.message), 1)
+        self.assertEqual(type(result.message[0]).__name__, "Plain")
+        self.assertEqual(result.message[0].text, "tg status")
+
     async def test_convert_message_removes_self_mention_from_message_str(self):
         module = _load_message_converter_module()
         entity_type = sys.modules["telethon.tl.types"].MessageEntityMention
