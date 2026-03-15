@@ -13,6 +13,7 @@ from .telethon_adapter.services.profile_service import TelethonProfileService
 from .telethon_adapter.services import (
     TelethonPruneService,
     TelethonSender,
+    TelethonStickerService,
     TelethonStatusService,
 )
 from .telethon_adapter import TelethonPlatformAdapter  # noqa: F401
@@ -27,6 +28,7 @@ class TelethonAdapterPlugin(Star):
         self.context = context
         self._profile_service = TelethonProfileService()
         self._prune_service = TelethonPruneService()
+        self._sticker_service = TelethonStickerService(self)
         self._status_service = TelethonStatusService(context)
         self._sender = TelethonSender()
 
@@ -73,10 +75,15 @@ class TelethonAdapterPlugin(Star):
         text: str,
         *,
         auto_delete_after: float | None = None,
+        link_preview: bool = False,
         **log_kwargs: str,
     ) -> bool:
         try:
-            sent_message = await self._sender.send_html_message(event, text)
+            sent_message = await self._sender.send_html_message(
+                event,
+                text,
+                link_preview=link_preview,
+            )
         except ValueError:
             event.set_result(text)
             return False
@@ -270,6 +277,51 @@ class TelethonAdapterPlugin(Star):
             execute=_execute,
             send_result=_send,
         )
+
+    @tg.command("sticker")
+    @filter.permission_type(filter.PermissionType.ADMIN)
+    async def tg_sticker(
+        self,
+        event: AstrMessageEvent,
+        arg1: str = "",
+        arg2: str = "",
+    ) -> None:
+        """设置默认贴纸包名，或把回复的图片/贴纸加入自己的贴纸包。tg sticker [pack_name|emoji] [emoji]"""
+        self._log_command_debug(event, "tg_sticker", arg1=arg1, arg2=arg2)
+        if not self._profile_service.supports_event(event):
+            await self._send_text_result(
+                event,
+                "当前事件不来自 Telethon 适配器，无法执行贴纸操作。",
+                auto_delete_after=PRUNE_RESULT_TTL_SECONDS,
+            )
+            return
+
+        try:
+            payload = await self._sticker_service.handle_command(event, arg1, arg2)
+        except ValueError as exc:
+            await self._send_text_result(
+                event,
+                str(exc),
+                auto_delete_after=PRUNE_RESULT_TTL_SECONDS,
+            )
+            return
+        except Exception as exc:
+            logger.exception("[Telethon] 执行 sticker 失败: arg1=%r arg2=%r", arg1, arg2)
+            await self._send_text_result(
+                event,
+                f"贴纸处理失败: {exc}",
+                auto_delete_after=PRUNE_RESULT_TTL_SECONDS,
+            )
+            return
+
+        sent = await self._send_text_result(
+            event,
+            payload.text,
+            link_preview=payload.link_preview,
+            auto_delete_after=PRUNE_RESULT_TTL_SECONDS,
+        )
+        if sent:
+            await self._try_delete_command_message(event)
 
     @tg.command("prune")
     @filter.permission_type(filter.PermissionType.ADMIN)

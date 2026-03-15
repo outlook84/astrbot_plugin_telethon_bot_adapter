@@ -11,6 +11,7 @@
 - 支持引用回复（`Reply` 消息段）
 - 提供 `tg profile` 命令，用于获取用户/群组/频道资料
 - 提供 `tg status` 命令，用于查看当前 AstrBot 状态
+- 提供 `tg sticker` 命令，用于把回复的图片/贴纸加入自己的贴纸包
 - 提供 `tg prune` / `tg selfprune` / `tg youprune` 命令，用于批量删除消息
 
 ## 注意事项
@@ -111,6 +112,24 @@ python3 ./astrbot_plugin_telethon_adapter/scripts/generate_session.py
 - 系统 CPU / 内存 / Swap 占用
 - 当前 AstrBot 进程 CPU / 内存占用
 - 当前进程运行时长
+
+`tg sticker` 用法：
+
+```text
+-astr tg sticker my_pack_name
+-astr tg sticker
+-astr tg sticker 😎
+-astr tg sticker my_pack_name 😎
+```
+
+`tg sticker` 说明：
+
+- 不回复消息时：`tg sticker <pack_name>` 用于设置当前账号的默认贴纸包名。
+- 回复图片/贴纸时：`tg sticker` 会把该媒体加入默认贴纸包。
+- 回复媒体时传一个参数且该参数不是合法包名时，会把它视为自定义 emoji，例如 `tg sticker 😎`。
+- 回复媒体时传两个参数时，格式为 `tg sticker <pack_name> <emoji>`，会临时使用指定贴纸包和 emoji。
+- 普通图片会自动缩放到 Telegram 贴纸要求的最大边 `512px`，并转换为 `webp`。
+- 默认贴纸包名会保存在 AstrBot 的插件 KV 存储中，并按适配器 ID 区分多个适配器实例。
 
 批量删除命令：
 

@@ -18,6 +18,7 @@ class TelethonSender:
         text: str,
         file_path: str | None = None,
         follow_reply: bool = False,
+        link_preview: bool = False,
     ) -> Any:
         client = getattr(event, "client", None)
         peer = getattr(event, "peer", None)
@@ -31,7 +32,7 @@ class TelethonSender:
                 file=file_path,
                 caption=text,
                 parse_mode="html",
-                link_preview=False,
+                link_preview=link_preview,
                 reply_to=reply_to,
             )
         else:
@@ -39,7 +40,7 @@ class TelethonSender:
                 peer,
                 text,
                 parse_mode="html",
-                link_preview=False,
+                link_preview=link_preview,
                 reply_to=reply_to,
             )
 
