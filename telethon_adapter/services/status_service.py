@@ -45,6 +45,7 @@ class StatusSnapshot:
     swap_percent: str
     process_cpu_percent: str
     process_ram_percent: str
+    connection_state: str
 
 
 class TelethonStatusService:
@@ -68,6 +69,7 @@ class TelethonStatusService:
             f"{html.escape(t(language, 'status.swap'))}: <code>{html.escape(snapshot.swap_percent)}</code>",
             f"{html.escape(t(language, 'status.process_cpu'))}: <code>{html.escape(snapshot.process_cpu_percent)}</code>",
             f"{html.escape(t(language, 'status.process_ram'))}: <code>{html.escape(snapshot.process_ram_percent)}</code>",
+            f"{html.escape(t(language, 'status.connection_state'))}: <code>{html.escape(snapshot.connection_state)}</code>",
             f"{html.escape(t(language, 'status.run_time'))}: <code>{html.escape(snapshot.run_time)}</code>",
         ]
         return "\n".join(lines)
@@ -100,6 +102,8 @@ class TelethonStatusService:
         swap_stat = psutil.swap_memory()
         process_ram_percent = process.memory_info().rss / ram_stat.total * 100
         adapter_id, data_center = self._get_adapter_status(event)
+        reconnect_snapshot = self._get_reconnect_snapshot(event)
+        language = get_event_language(event)
 
         return StatusSnapshot(
             platform_name=platform.system().lower() or "unknown",
@@ -115,6 +119,10 @@ class TelethonStatusService:
             swap_percent=f"{swap_stat.percent:.1f}%",
             process_cpu_percent=f"{process_cpu_percent:.1f}%",
             process_ram_percent=f"{process_ram_percent:.1f}%",
+            connection_state=self._format_connection_state(
+                reconnect_snapshot.get("state"),
+                language,
+            ),
         )
 
     @staticmethod
@@ -160,13 +168,53 @@ class TelethonStatusService:
         )
         return adapter_id, data_center
 
+    def _get_reconnect_snapshot(self, event: Any | None = None) -> dict[str, Any]:
+        adapter = self._resolve_adapter(event)
+        if adapter is None:
+            return {}
+        getter = getattr(adapter, "get_reconnect_status", None)
+        if not callable(getter):
+            return {}
+        try:
+            snapshot = getter()
+        except Exception:
+            return {}
+        return snapshot if isinstance(snapshot, dict) else {}
+
+    def _resolve_adapter(self, event: Any | None = None) -> Any | None:
+        if self._context is None:
+            return None
+        platform_manager = getattr(self._context, "platform_manager", None)
+        get_insts = getattr(platform_manager, "get_insts", None)
+        if not callable(get_insts):
+            return None
+        event_adapter_id = self._get_event_adapter_id(event)
+        event_client = getattr(event, "client", None)
+        for inst in get_insts():
+            try:
+                meta = inst.meta()
+            except Exception:
+                continue
+            if getattr(meta, "name", None) != "telethon_userbot":
+                continue
+            if event_client is not None and getattr(inst, "client", None) is event_client:
+                return inst
+            if event_adapter_id and getattr(meta, "id", None) == event_adapter_id:
+                return inst
+        return None
+
+    @staticmethod
+    def _format_connection_state(state: Any, language: str) -> str:
+        key = str(state or "unknown").strip().lower() or "unknown"
+        return t(language, f"status.connection_state.{key}")
+
     @staticmethod
     def _get_event_adapter_id(event: Any | None) -> str:
         platform_meta = getattr(event, "platform_meta", None)
         adapter_id = str(getattr(platform_meta, "id", "") or "").strip()
         if adapter_id:
             return adapter_id
-        return t(event, "status.unknown")
+        return t(get_event_language(event), "status.unknown")
 
     @staticmethod
     def _get_event_dc_id(event: Any | None) -> int | None:

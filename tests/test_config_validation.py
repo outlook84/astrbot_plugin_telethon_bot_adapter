@@ -23,6 +23,12 @@ def _install_astrbot_stubs() -> None:
         def warning(self, *args, **kwargs):
             return None
 
+        def error(self, *args, **kwargs):
+            return None
+
+        def debug(self, *args, **kwargs):
+            return None
+
         def exception(self, *args, **kwargs):
             return None
 
@@ -144,6 +150,8 @@ def _install_pydantic_stubs() -> None:
 
 def _install_telethon_stubs() -> None:
     telethon_module = types.ModuleType("telethon")
+    errors_module = types.ModuleType("telethon.errors")
+    errors_common_module = types.ModuleType("telethon.errors.common")
     network_module = types.ModuleType("telethon.network")
     connection_module = types.ModuleType("telethon.network.connection")
     sessions_module = types.ModuleType("telethon.sessions")
@@ -154,6 +162,45 @@ def _install_telethon_stubs() -> None:
     class TelegramClient:
         def __init__(self, *args, **kwargs):
             return None
+
+    class _RPCError(Exception):
+        pass
+
+    class UnauthorizedError(_RPCError):
+        pass
+
+    class AuthKeyError(_RPCError):
+        pass
+
+    class BadRequestError(_RPCError):
+        pass
+
+    class ForbiddenError(_RPCError):
+        pass
+
+    class NotFoundError(_RPCError):
+        pass
+
+    class InvalidDCError(_RPCError):
+        pass
+
+    class ServerError(_RPCError):
+        pass
+
+    class TimedOutError(_RPCError):
+        pass
+
+    class FloodError(_RPCError):
+        pass
+
+    class AuthKeyNotFound(Exception):
+        pass
+
+    class SecurityError(Exception):
+        pass
+
+    class InvalidBufferError(BufferError):
+        pass
 
     class StringSession:
         def __init__(self, value):
@@ -178,10 +225,25 @@ def _install_telethon_stubs() -> None:
 
     telethon_module.TelegramClient = TelegramClient
     telethon_module.events = events_module
+    telethon_module.errors = errors_module
     network_module.connection = connection_module
     sessions_module.StringSession = StringSession
     events_module.NewMessage = _NewMessage()
     events_module.Raw = _Raw()
+    errors_module.RPCError = _RPCError
+    errors_module.UnauthorizedError = UnauthorizedError
+    errors_module.AuthKeyError = AuthKeyError
+    errors_module.BadRequestError = BadRequestError
+    errors_module.ForbiddenError = ForbiddenError
+    errors_module.NotFoundError = NotFoundError
+    errors_module.InvalidDCError = InvalidDCError
+    errors_module.ServerError = ServerError
+    errors_module.TimedOutError = TimedOutError
+    errors_module.FloodError = FloodError
+    errors_module.common = errors_common_module
+    errors_common_module.AuthKeyNotFound = AuthKeyNotFound
+    errors_common_module.SecurityError = SecurityError
+    errors_common_module.InvalidBufferError = InvalidBufferError
 
     for name in [
         "DocumentAttributeAudio",
@@ -199,6 +261,8 @@ def _install_telethon_stubs() -> None:
         setattr(tl_types_module, name, _stub_type(name))
 
     sys.modules["telethon"] = telethon_module
+    sys.modules["telethon.errors"] = errors_module
+    sys.modules["telethon.errors.common"] = errors_common_module
     sys.modules["telethon.network"] = network_module
     sys.modules["telethon.network.connection"] = connection_module
     sys.modules["telethon.sessions"] = sessions_module
@@ -474,6 +538,8 @@ class ConfigValidationTests(unittest.TestCase):
         self.assertEqual(
             kwargs,
             {
+                "auto_reconnect": True,
+                "connection_retries": 5,
                 "proxy": (
                     "SOCKS5",
                     "127.0.0.1",
@@ -481,7 +547,8 @@ class ConfigValidationTests(unittest.TestCase):
                     True,
                     "user",
                     "pass",
-                )
+                ),
+                "retry_delay": 1,
             },
         )
 
@@ -505,11 +572,215 @@ class ConfigValidationTests(unittest.TestCase):
 
         kwargs = adapter._build_client_kwargs()
 
+        self.assertTrue(kwargs["auto_reconnect"])
+        self.assertEqual(kwargs["connection_retries"], 5)
         self.assertEqual(kwargs["connection"], mtproto_connection)
         self.assertEqual(kwargs["proxy"], ("127.0.0.1", 443, "deadbeef"))
+        self.assertEqual(kwargs["retry_delay"], 1)
+
+    def test_build_client_kwargs_includes_explicit_telethon_reconnect_defaults(self):
+        module = _load_adapter_module()
+        adapter = module.TelethonPlatformAdapter(
+            {
+                "api_id": 123,
+                "api_hash": "hash",
+                "session_string": "session",
+            },
+            {},
+            asyncio.Queue(),
+        )
+
+        kwargs = adapter._build_client_kwargs()
+
+        self.assertEqual(
+            kwargs,
+            {
+                "auto_reconnect": True,
+                "connection_retries": 5,
+                "retry_delay": 1,
+            },
+        )
 
 
 class AdapterBehaviorTests(unittest.IsolatedAsyncioTestCase):
+    async def test_should_retry_client_error_distinguishes_telethon_error_types(self):
+        module = _load_adapter_module()
+        adapter = module.TelethonPlatformAdapter(
+            {
+                "api_id": 123,
+                "api_hash": "hash",
+                "session_string": "session",
+            },
+            {},
+            asyncio.Queue(),
+        )
+
+        self.assertTrue(adapter._should_retry_client_error(module.telethon_errors.ServerError()))
+        self.assertTrue(adapter._should_retry_client_error(module.telethon_errors.TimedOutError()))
+        self.assertFalse(adapter._should_retry_client_error(module.telethon_errors.AuthKeyError()))
+        self.assertFalse(
+            adapter._should_retry_client_error(module.telethon_errors.common.AuthKeyNotFound())
+        )
+        self.assertFalse(adapter._should_retry_client_error(RuntimeError("network parser bug")))
+
+    async def test_run_recreates_client_after_disconnect(self):
+        module = _load_adapter_module()
+        adapter = module.TelethonPlatformAdapter(
+            {
+                "api_id": 123,
+                "api_hash": "hash",
+                "session_string": "session",
+            },
+            {},
+            asyncio.Queue(),
+        )
+        sleep_delays = []
+        created_clients = []
+
+        class _FakeClient:
+            def __init__(self, index):
+                self.index = index
+                self.handlers = []
+                self.disconnect_calls = 0
+
+            async def connect(self):
+                return None
+
+            async def is_user_authorized(self):
+                return True
+
+            async def get_me(self):
+                return types.SimpleNamespace(id=1000 + self.index, username=f"user{self.index}")
+
+            def add_event_handler(self, handler, event):
+                self.handlers.append((handler, event))
+
+            async def run_until_disconnected(self):
+                if self.index >= 2:
+                    adapter._stop_requested = True
+                return None
+
+            async def disconnect(self):
+                self.disconnect_calls += 1
+
+        def fake_create_client(client_kwargs):
+            self.assertTrue(client_kwargs["auto_reconnect"])
+            self.assertEqual(client_kwargs["connection_retries"], 5)
+            self.assertEqual(client_kwargs["retry_delay"], 1)
+            client = _FakeClient(len(created_clients) + 1)
+            created_clients.append(client)
+            return client
+
+        async def fake_sleep(delay):
+            sleep_delays.append(delay)
+
+        adapter._create_client = fake_create_client
+        adapter._sleep_before_reconnect = fake_sleep
+
+        await adapter.run()
+
+        self.assertEqual(len(created_clients), 2)
+        self.assertEqual(sleep_delays, [1.0])
+        self.assertEqual(adapter.self_id, "1002")
+        self.assertEqual(adapter.self_username, "user2")
+        self.assertGreaterEqual(created_clients[0].disconnect_calls, 1)
+        self.assertGreaterEqual(created_clients[1].disconnect_calls, 1)
+        self.assertEqual(len(created_clients[0].handlers), 2)
+
+    async def test_run_does_not_retry_unauthorized_session(self):
+        module = _load_adapter_module()
+        adapter = module.TelethonPlatformAdapter(
+            {
+                "api_id": 123,
+                "api_hash": "hash",
+                "session_string": "session",
+            },
+            {},
+            asyncio.Queue(),
+        )
+        created_clients = []
+        sleep_delays = []
+
+        class _FakeClient:
+            async def connect(self):
+                return None
+
+            async def is_user_authorized(self):
+                return False
+
+            async def disconnect(self):
+                return None
+
+        def fake_create_client(client_kwargs):
+            created_clients.append(client_kwargs)
+            return _FakeClient()
+
+        async def fake_sleep(delay):
+            sleep_delays.append(delay)
+
+        adapter._create_client = fake_create_client
+        adapter._sleep_before_reconnect = fake_sleep
+
+        with self.assertRaisesRegex(RuntimeError, "unauthorized"):
+            await adapter.run()
+
+        self.assertEqual(len(created_clients), 1)
+        self.assertEqual(sleep_delays, [])
+
+    async def test_run_stops_retrying_when_clean_disconnect_leaves_session_unauthorized(self):
+        module = _load_adapter_module()
+        adapter = module.TelethonPlatformAdapter(
+            {
+                "api_id": 123,
+                "api_hash": "hash",
+                "session_string": "session",
+            },
+            {},
+            asyncio.Queue(),
+        )
+        created_clients = []
+        sleep_delays = []
+
+        class _FakeClient:
+            def __init__(self):
+                self.handlers = []
+                self.authorized_checks = 0
+
+            async def connect(self):
+                return None
+
+            async def is_user_authorized(self):
+                self.authorized_checks += 1
+                return self.authorized_checks == 1
+
+            async def get_me(self):
+                return types.SimpleNamespace(id=1001, username="user1")
+
+            def add_event_handler(self, handler, event):
+                self.handlers.append((handler, event))
+
+            async def run_until_disconnected(self):
+                return None
+
+            async def disconnect(self):
+                return None
+
+        def fake_create_client(client_kwargs):
+            created_clients.append(client_kwargs)
+            return _FakeClient()
+
+        async def fake_sleep(delay):
+            sleep_delays.append(delay)
+
+        adapter._create_client = fake_create_client
+        adapter._sleep_before_reconnect = fake_sleep
+
+        with self.assertRaisesRegex(RuntimeError, "no longer authorized"):
+            await adapter.run()
+
+        self.assertEqual(len(created_clients), 1)
+        self.assertEqual(sleep_delays, [])
+
     async def test_on_new_message_allows_group_bot_sender_by_default(self):
         module = _load_adapter_module()
         adapter = module.TelethonPlatformAdapter(

@@ -4,6 +4,7 @@ import asyncio
 import os
 import re
 import tempfile
+import time
 from pathlib import Path
 from typing import Any
 
@@ -27,6 +28,10 @@ except ImportError:
     ProxyType = None
 
 from telethon import TelegramClient, events
+try:
+    from telethon import errors as telethon_errors
+except ImportError:
+    telethon_errors = None
 from telethon.network import connection
 from telethon.sessions import StringSession
 from .config import (
@@ -41,6 +46,12 @@ from .message_converter import TelethonMessageConverter
 from .telethon_event import TelethonEvent
 
 PLUGIN_ROOT = Path(__file__).resolve().parent.parent
+TELETHON_AUTO_RECONNECT = True
+TELETHON_CONNECTION_RETRIES = 5
+TELETHON_RETRY_DELAY_SECONDS = 1
+OUTER_RECONNECT_BASE_DELAY_SECONDS = 1.0
+OUTER_RECONNECT_MAX_DELAY_SECONDS = 30.0
+OUTER_RECONNECT_RESET_AFTER_SECONDS = 300.0
 
 
 @register_platform_adapter(
@@ -68,8 +79,14 @@ class TelethonPlatformAdapter(Platform):
         self.self_id = ""
         self.self_username = ""
         self._running = False
+        self._stop_requested = False
         self._main_task: asyncio.Task | None = None
         self._cleanup_task: asyncio.Task | None = None
+        self._retry_sleep_task: asyncio.Task | None = None
+        self._reconnect_attempt = 0
+        self._next_reconnect_at_monotonic: float | None = None
+        self._last_disconnect_reason = ""
+        self._last_disconnect_at_unix: float | None = None
         self._media_group_cache: dict[tuple[str, int], dict[str, Any]] = {}
         self._recent_event_keys: dict[tuple[str, int], float] = {}
         self._recent_event_keys_cleanup_at = 0.0
@@ -92,79 +109,79 @@ class TelethonPlatformAdapter(Platform):
         validate_config(self)
 
         client_kwargs = self._build_client_kwargs()
-        self.client = TelegramClient(
-            StringSession(self.session_string),
-            self.api_id,
-            self.api_hash,
-            **client_kwargs,
-        )
+        retry_attempt = 0
 
         try:
             self._running = True
-            await self.client.connect()
-            if not await self.client.is_user_authorized():
-                raise RuntimeError(
-                    "[Telethon] The current session_string is unauthorized. Regenerate a valid StringSession."
-                )
-
-            me = await self.client.get_me()
-            self.self_id = str(me.id)
-            self.self_username = str(getattr(me, "username", "") or "").strip().lower()
-
-            logger.info(
-                "[Telethon] Userbot started: %s username=%s "
-                "download_incoming_media=%s incoming_media_ttl_seconds=%s "
-                "trigger_prefix=%r reply_to_self_triggers_command=%s log_processed_messages_only=%s proxy_type=%s "
-                "proxy_host=%s proxy_port=%s raw_config=%s",
-                self.self_id,
-                self.self_username,
-                self.download_incoming_media,
-                self.incoming_media_ttl_seconds,
-                self.trigger_prefix,
-                self.reply_to_self_triggers_command,
-                self.log_processed_messages_only,
-                self.proxy_type or "direct",
-                self.proxy_host or "",
-                self.proxy_port or 0,
-                {
-                    "trigger_prefix": self.config.get("trigger_prefix"),
-                    "reply_to_self_triggers_command": self.config.get(
-                        "reply_to_self_triggers_command"
-                    ),
-                    "download_incoming_media": self.config.get("download_incoming_media"),
-                    "incoming_media_ttl_seconds": self.config.get(
-                        "incoming_media_ttl_seconds"
-                    ),
-                    "log_processed_messages_only": self.config.get(
-                        "log_processed_messages_only"
-                    ),
-                    "proxy_type": self.config.get("proxy_type"),
-                    "proxy_host": self.config.get("proxy_host"),
-                    "proxy_port": self.config.get("proxy_port"),
-                    "proxy_rdns": self.config.get("proxy_rdns"),
-                },
-            )
-            self.client.add_event_handler(
-                self._on_new_message,
-                events.NewMessage(incoming=True, outgoing=False),
-            )
-            self.client.add_event_handler(
-                self._on_new_message,
-                events.NewMessage(incoming=False, outgoing=True),
-            )
-            if not self.log_processed_messages_only:
-                self.client.add_event_handler(self._on_raw_event, events.Raw())
             if self.incoming_media_ttl_seconds > 0:
                 self._cleanup_task = asyncio.create_task(self._cleanup_temp_files_loop())
-            self._main_task = asyncio.create_task(self.client.run_until_disconnected())
-            await self._main_task
+            self._stop_requested = False
+
+            while not self._stop_requested:
+                loop = asyncio.get_running_loop()
+                run_started_at = loop.time()
+                disconnected_cleanly = False
+                try:
+                    await self._run_client_once(client_kwargs)
+                    disconnected_cleanly = True
+                    if not self._stop_requested:
+                        should_retry_clean_disconnect = await self._should_retry_clean_disconnect()
+                        if not should_retry_clean_disconnect:
+                            raise RuntimeError(
+                                "[Telethon] Client disconnected and the current session is no longer authorized."
+                            )
+                except asyncio.CancelledError:
+                    logger.info("[Telethon] Adapter task cancelled")
+                    raise
+                except Exception as exc:
+                    if not self._should_retry_client_error(exc):
+                        self._record_disconnect(self._describe_disconnect_reason(exc))
+                        raise
+                    self._record_disconnect(self._describe_disconnect_reason(exc))
+                    logger.exception("[Telethon] Client loop failed; recreating TelegramClient")
+                finally:
+                    uptime = loop.time() - run_started_at
+                    await self._disconnect_current_client()
+
+                if self._stop_requested:
+                    break
+
+                if disconnected_cleanly:
+                    self._record_disconnect("clean_disconnect")
+                    logger.warning(
+                        "[Telethon] Client disconnected. Recreating TelegramClient: uptime=%.1fs",
+                        uptime,
+                    )
+
+                if uptime >= OUTER_RECONNECT_RESET_AFTER_SECONDS:
+                    retry_attempt = 0
+                retry_attempt += 1
+                self._reconnect_attempt = retry_attempt
+                delay = self._compute_reconnect_delay(retry_attempt)
+                self._next_reconnect_at_monotonic = loop.time() + delay
+                logger.warning(
+                    "[Telethon] Reconnect attempt #%s scheduled in %.1fs",
+                    retry_attempt,
+                    delay,
+                )
+                await self._sleep_before_reconnect(delay)
+                self._next_reconnect_at_monotonic = None
         except asyncio.CancelledError:
-            logger.info("[Telethon] Adapter task cancelled")
+            pass
         finally:
             self._running = False
             await self.terminate()
 
     async def terminate(self) -> None:
+        self._stop_requested = True
+
+        if self._retry_sleep_task and not self._retry_sleep_task.done():
+            self._retry_sleep_task.cancel()
+            try:
+                await self._retry_sleep_task
+            except asyncio.CancelledError:
+                pass
+
         if self._cleanup_task and not self._cleanup_task.done():
             self._cleanup_task.cancel()
             try:
@@ -179,19 +196,7 @@ class TelethonPlatformAdapter(Platform):
         self._media_group_cache.clear()
         await self._cleanup_expired_temp_files(force=True)
         self._remove_media_temp_dir_if_empty()
-
-        if self.client:
-            try:
-                await self.client.disconnect()
-            except Exception:
-                logger.exception("[Telethon] Failed to close connection")
-
-        if self._main_task and not self._main_task.done():
-            self._main_task.cancel()
-            try:
-                await self._main_task
-            except asyncio.CancelledError:
-                pass
+        await self._disconnect_current_client()
 
     async def send_by_session(
         self, session: MessageSesion, message_chain: MessageChain
@@ -216,9 +221,218 @@ class TelethonPlatformAdapter(Platform):
     def get_client(self):
         return self.client
 
+    def get_reconnect_status(self) -> dict[str, Any]:
+        next_retry_in_seconds: float | None = None
+        if self._next_reconnect_at_monotonic is not None:
+            next_retry_in_seconds = max(
+                0.0,
+                self._next_reconnect_at_monotonic - time.monotonic(),
+            )
+
+        state = "stopped"
+        if self._retry_sleep_task and not self._retry_sleep_task.done():
+            state = "reconnecting"
+        elif self.client is not None:
+            state = "connected"
+        elif self._running:
+            state = "connecting"
+
+        return {
+            "state": state,
+            "retry_attempt": self._reconnect_attempt,
+            "next_retry_in_seconds": next_retry_in_seconds,
+            "last_disconnect_reason": self._last_disconnect_reason,
+            "last_disconnect_at_unix": self._last_disconnect_at_unix,
+        }
+
+    async def _run_client_once(self, client_kwargs: dict[str, Any]) -> None:
+        self.client = self._create_client(client_kwargs)
+        await self.client.connect()
+        if not await self.client.is_user_authorized():
+            raise RuntimeError(
+                "[Telethon] The current session_string is unauthorized. Regenerate a valid StringSession."
+            )
+
+        me = await self.client.get_me()
+        self.self_id = str(me.id)
+        self.self_username = str(getattr(me, "username", "") or "").strip().lower()
+
+        logger.info(
+            "[Telethon] Userbot started: %s username=%s "
+            "download_incoming_media=%s incoming_media_ttl_seconds=%s "
+            "trigger_prefix=%r reply_to_self_triggers_command=%s log_processed_messages_only=%s proxy_type=%s "
+            "proxy_host=%s proxy_port=%s raw_config=%s",
+            self.self_id,
+            self.self_username,
+            self.download_incoming_media,
+            self.incoming_media_ttl_seconds,
+            self.trigger_prefix,
+            self.reply_to_self_triggers_command,
+            self.log_processed_messages_only,
+            self.proxy_type or "direct",
+            self.proxy_host or "",
+            self.proxy_port or 0,
+            {
+                "trigger_prefix": self.config.get("trigger_prefix"),
+                "reply_to_self_triggers_command": self.config.get(
+                    "reply_to_self_triggers_command"
+                ),
+                "download_incoming_media": self.config.get("download_incoming_media"),
+                "incoming_media_ttl_seconds": self.config.get(
+                    "incoming_media_ttl_seconds"
+                ),
+                "log_processed_messages_only": self.config.get(
+                    "log_processed_messages_only"
+                ),
+                "proxy_type": self.config.get("proxy_type"),
+                "proxy_host": self.config.get("proxy_host"),
+                "proxy_port": self.config.get("proxy_port"),
+                "proxy_rdns": self.config.get("proxy_rdns"),
+            },
+        )
+        self.client.add_event_handler(
+            self._on_new_message,
+            events.NewMessage(incoming=True, outgoing=False),
+        )
+        self.client.add_event_handler(
+            self._on_new_message,
+            events.NewMessage(incoming=False, outgoing=True),
+        )
+        if not self.log_processed_messages_only:
+            self.client.add_event_handler(self._on_raw_event, events.Raw())
+
+        self._main_task = asyncio.create_task(self.client.run_until_disconnected())
+        await self._main_task
+
+    def _create_client(self, client_kwargs: dict[str, Any]) -> TelegramClient:
+        return TelegramClient(
+            StringSession(self.session_string),
+            self.api_id,
+            self.api_hash,
+            **client_kwargs,
+        )
+
+    async def _disconnect_current_client(self) -> None:
+        client = self.client
+        task = self._main_task
+        self.client = None
+        self._main_task = None
+
+        if client:
+            try:
+                await client.disconnect()
+            except Exception:
+                logger.exception("[Telethon] Failed to close connection")
+
+        if task and not task.done():
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
+    def _should_retry_client_error(self, exc: Exception) -> bool:
+        if self._stop_requested:
+            return False
+        if self._is_fatal_client_error(exc):
+            return False
+        if isinstance(exc, (OSError, ConnectionError, TimeoutError, asyncio.TimeoutError)):
+            return True
+        if telethon_errors and isinstance(
+            exc,
+            self._retryable_telethon_error_types(),
+        ):
+            return True
+        return False
+
+    async def _should_retry_clean_disconnect(self) -> bool:
+        if not self.client or self._stop_requested:
+            return False
+        try:
+            return bool(await self.client.is_user_authorized())
+        except Exception as exc:
+            return self._should_retry_client_error(exc)
+
+    def _is_fatal_client_error(self, exc: Exception) -> bool:
+        if isinstance(exc, ValueError):
+            return True
+        message = str(exc).lower()
+        if "unauthorized" in message or "session_string" in message:
+            return True
+        if telethon_errors and isinstance(
+            exc,
+            self._fatal_telethon_error_types(),
+        ):
+            return True
+        return False
+
+    def _retryable_telethon_error_types(self) -> tuple[type[BaseException], ...]:
+        if telethon_errors is None:
+            return ()
+        retryable = [
+            getattr(telethon_errors, "ServerError", None),
+            getattr(telethon_errors, "TimedOutError", None),
+        ]
+        return tuple(error_type for error_type in retryable if error_type is not None)
+
+    def _fatal_telethon_error_types(self) -> tuple[type[BaseException], ...]:
+        if telethon_errors is None:
+            return ()
+        common_module = getattr(telethon_errors, "common", None)
+        fatal = [
+            getattr(telethon_errors, "UnauthorizedError", None),
+            getattr(telethon_errors, "AuthKeyError", None),
+            getattr(telethon_errors, "BadRequestError", None),
+            getattr(telethon_errors, "ForbiddenError", None),
+            getattr(telethon_errors, "NotFoundError", None),
+            getattr(telethon_errors, "InvalidDCError", None),
+            getattr(common_module, "AuthKeyNotFound", None),
+            getattr(common_module, "SecurityError", None),
+            getattr(common_module, "InvalidBufferError", None),
+        ]
+        retryable = set(self._retryable_telethon_error_types())
+        ordered: list[type[BaseException]] = []
+        for error_type in fatal:
+            if error_type is None or error_type in retryable or error_type in ordered:
+                continue
+            ordered.append(error_type)
+        return tuple(ordered)
+
+    def _compute_reconnect_delay(self, retry_attempt: int) -> float:
+        exponent = max(0, retry_attempt - 1)
+        delay = OUTER_RECONNECT_BASE_DELAY_SECONDS * (2 ** exponent)
+        return min(delay, OUTER_RECONNECT_MAX_DELAY_SECONDS)
+
+    async def _sleep_before_reconnect(self, delay: float) -> None:
+        self._retry_sleep_task = asyncio.create_task(asyncio.sleep(delay))
+        try:
+            await self._retry_sleep_task
+        except asyncio.CancelledError:
+            if not self._stop_requested:
+                raise
+        finally:
+            self._retry_sleep_task = None
+            self._next_reconnect_at_monotonic = None
+
+    def _record_disconnect(self, reason: str) -> None:
+        self._last_disconnect_reason = str(reason or "").strip() or "unknown"
+        self._last_disconnect_at_unix = time.time()
+
+    @staticmethod
+    def _describe_disconnect_reason(exc: Exception) -> str:
+        message = str(exc).strip()
+        if message:
+            return message
+        return exc.__class__.__name__
+
     def _build_client_kwargs(self) -> dict[str, Any]:
+        kwargs: dict[str, Any] = {
+            "auto_reconnect": TELETHON_AUTO_RECONNECT,
+            "connection_retries": TELETHON_CONNECTION_RETRIES,
+            "retry_delay": TELETHON_RETRY_DELAY_SECONDS,
+        }
         if not self.proxy_type:
-            return {}
+            return kwargs
 
         if not self.proxy_host or not self.proxy_port:
             raise ValueError("[Telethon] Proxy is configured, but proxy_host or proxy_port is missing")
@@ -233,16 +447,15 @@ class TelethonPlatformAdapter(Platform):
                 "socks4": ProxyType.SOCKS4,
                 "http": ProxyType.HTTP,
             }
-            return {
-                "proxy": (
-                    proxy_type_map[self.proxy_type],
-                    self.proxy_host,
-                    self.proxy_port,
-                    self.proxy_rdns,
-                    self.proxy_username or None,
-                    self.proxy_password or None,
-                )
-            }
+            kwargs["proxy"] = (
+                proxy_type_map[self.proxy_type],
+                self.proxy_host,
+                self.proxy_port,
+                self.proxy_rdns,
+                self.proxy_username or None,
+                self.proxy_password or None,
+            )
+            return kwargs
 
         if self.proxy_type == "mtproto":
             if not self.proxy_secret:
@@ -256,14 +469,13 @@ class TelethonPlatformAdapter(Platform):
                 raise RuntimeError(
                     "[Telethon] The current Telethon version does not provide an MTProto proxy connection class"
                 )
-            return {
-                "connection": mtproto_connection,
-                "proxy": (
-                    self.proxy_host,
-                    self.proxy_port,
-                    self.proxy_secret,
-                ),
-            }
+            kwargs["connection"] = mtproto_connection
+            kwargs["proxy"] = (
+                self.proxy_host,
+                self.proxy_port,
+                self.proxy_secret,
+            )
+            return kwargs
 
         raise ValueError(
             "[Telethon] Unsupported proxy_type. Valid values: socks5, socks4, http, mtproto"
