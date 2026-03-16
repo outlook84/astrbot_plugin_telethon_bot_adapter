@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import html
+import os
 import re
 from contextlib import asynccontextmanager
 from typing import Any
@@ -42,6 +43,16 @@ class TelethonEvent(AstrMessageEvent):
         re.compile(r"(?<!_)__[^_\n]+__(?!_)"),
         re.compile(r"`[^`\n]+`"),
     )
+
+    @staticmethod
+    def _is_gif_path(path: str) -> bool:
+        if path.lower().endswith(".gif"):
+            return True
+        try:
+            with open(path, "rb") as f:
+                return f.read(6) in (b"GIF87a", b"GIF89a")
+        except OSError:
+            return False
 
     def __init__(
         self,
@@ -146,15 +157,20 @@ class TelethonEvent(AstrMessageEvent):
         *,
         caption: str | None,
         reply_to: int | None,
+        mime_type: str | None = None,
+        attributes: list[Any] | None = None,
     ) -> Any:
         telethon_reply_to = self._build_reply_to(reply_to)
         if self.thread_id is None:
-            return await self.client.send_file(
-                self.peer,
-                file=path,
-                caption=caption,
-                reply_to=telethon_reply_to,
-            )
+            payload: dict[str, Any] = {
+                "caption": caption,
+                "reply_to": telethon_reply_to,
+            }
+            if mime_type is not None:
+                payload["mime_type"] = mime_type
+            if attributes:
+                payload["attributes"] = attributes
+            return await self.client.send_file(self.peer, file=path, **payload)
 
         entity = await self._resolve_input_peer()
         parsed_caption, msg_entities = await self._parse_formatting_entities(
@@ -164,7 +180,12 @@ class TelethonEvent(AstrMessageEvent):
         file_to_media = getattr(self.client, "_file_to_media", None)
         if not callable(file_to_media):
             raise RuntimeError("Telethon client does not expose _file_to_media")
-        _file_handle, media, _is_image = await file_to_media(path)
+        media_kwargs: dict[str, Any] = {}
+        if mime_type is not None:
+            media_kwargs["mime_type"] = mime_type
+        if attributes:
+            media_kwargs["attributes"] = attributes
+        _file_handle, media, _is_image = await file_to_media(path, **media_kwargs)
         request = functions.messages.SendMediaRequest(
             peer=entity,
             media=media,
@@ -252,15 +273,18 @@ class TelethonEvent(AstrMessageEvent):
         reply_to: int | None,
         action_name: str,
         fallback_action: types.TypeSendMessageAction,
+        mime_type: str | None = None,
+        attributes: list[Any] | None = None,
     ) -> int | None:
         effective_reply_to = self._effective_reply_to(reply_to)
-        telethon_reply_to = self._build_reply_to(reply_to)
         try:
             async with self._chat_action_scope(action_name, fallback_action):
                 await self._send_media_request(
                     path,
                     caption=caption,
                     reply_to=reply_to,
+                    mime_type=mime_type,
+                    attributes=attributes,
                 )
         except Exception:
             context = self._message_log_context(effective_reply_to)
@@ -314,12 +338,19 @@ class TelethonEvent(AstrMessageEvent):
 
             if isinstance(item, Image):
                 file_path = await item.convert_to_file_path()
+                is_gif = self._is_gif_path(file_path)
                 reply_to = await self._send_media(
                     file_path,
                     None,
                     reply_to,
-                    "photo",
-                    types.SendMessageUploadPhotoAction(progress=0),
+                    "video" if is_gif else "photo",
+                    (
+                        types.SendMessageUploadVideoAction(progress=0)
+                        if is_gif
+                        else types.SendMessageUploadPhotoAction(progress=0)
+                    ),
+                    mime_type="image/gif" if is_gif else None,
+                    attributes=[types.DocumentAttributeAnimated()] if is_gif else None,
                 )
                 continue
 

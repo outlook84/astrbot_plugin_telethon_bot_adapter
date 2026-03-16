@@ -131,6 +131,9 @@ def _install_telethon_stubs() -> None:
         def __init__(self, progress=0):
             self.progress = progress
 
+    class DocumentAttributeAnimated:
+        pass
+
     class InputReplyToMessage:
         def __init__(self, reply_to_msg_id, top_msg_id=None):
             self.reply_to_msg_id = reply_to_msg_id
@@ -144,6 +147,7 @@ def _install_telethon_stubs() -> None:
     messages_module.SendMediaRequest = SendMediaRequest
     functions_module.messages = messages_module
     types_module.InputReplyToMessage = InputReplyToMessage
+    types_module.DocumentAttributeAnimated = DocumentAttributeAnimated
     types_module.SendMessageTypingAction = SendMessageTypingAction
     types_module.SendMessageUploadPhotoAction = SendMessageUploadPhotoAction
     types_module.SendMessageUploadVideoAction = SendMessageUploadPhotoAction
@@ -375,6 +379,7 @@ class _FakeClient:
         self.typing_actions = []
         self.sent_files = []
         self.requests = []
+        self.file_to_media_calls = []
 
     async def __call__(self, request):
         self.requests.append(request)
@@ -388,9 +393,9 @@ class _FakeClient:
         self.sent_messages.append((peer, text, kwargs))
         return {"peer": peer, "text": text, "kwargs": kwargs}
 
-    async def send_file(self, peer, file, caption=None, reply_to=None):
-        self.sent_files.append((peer, file, caption, reply_to))
-        return {"peer": peer, "file": file, "caption": caption, "reply_to": reply_to}
+    async def send_file(self, peer, file, caption=None, reply_to=None, **kwargs):
+        self.sent_files.append((peer, file, caption, reply_to, kwargs))
+        return {"peer": peer, "file": file, "caption": caption, "reply_to": reply_to, "kwargs": kwargs}
 
     async def get_input_entity(self, peer):
         return f"input:{peer}"
@@ -399,6 +404,7 @@ class _FakeClient:
         return text, [types.SimpleNamespace(parse_mode=parse_mode)]
 
     async def _file_to_media(self, file, **kwargs):
+        self.file_to_media_calls.append((file, kwargs))
         return None, f"media:{file}", file.lower().endswith((".png", ".jpg", ".jpeg", ".gif"))
 
     def _get_response_message(self, request, result, entity):
@@ -658,6 +664,38 @@ class TelethonEventTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(type(request.reply_to).__name__, "InputReplyToMessage")
         self.assertEqual(request.reply_to.reply_to_msg_id, 999)
         self.assertEqual(request.reply_to.top_msg_id, 456)
+
+    async def test_send_gif_marks_animation_attributes(self):
+        module = _load_telethon_event_module()
+        client = _FakeClient()
+        event = module.TelethonEvent("", object(), object(), "123", client)
+        chain_type = sys.modules["astrbot.api.event"].MessageChain
+
+        await event.send(chain_type([_make_image_component("/tmp/animated.gif")]))
+
+        self.assertEqual(len(client.sent_files), 1)
+        peer, path, caption, reply_to, kwargs = client.sent_files[0]
+        self.assertEqual(peer, 123)
+        self.assertEqual(path, "/tmp/animated.gif")
+        self.assertIsNone(caption)
+        self.assertIsNone(reply_to)
+        self.assertEqual(kwargs["mime_type"], "image/gif")
+        self.assertEqual(len(kwargs["attributes"]), 1)
+        self.assertEqual(type(kwargs["attributes"][0]).__name__, "DocumentAttributeAnimated")
+
+    async def test_send_topic_gif_marks_animation_attributes(self):
+        module = _load_telethon_event_module()
+        client = _FakeClient()
+        event = module.TelethonEvent("", object(), object(), "123#456", client)
+        chain_type = sys.modules["astrbot.api.event"].MessageChain
+
+        await event.send(chain_type([_make_image_component("/tmp/topic-animated.gif")]))
+
+        self.assertEqual(client.file_to_media_calls[-1][0], "/tmp/topic-animated.gif")
+        media_kwargs = client.file_to_media_calls[-1][1]
+        self.assertEqual(media_kwargs["mime_type"], "image/gif")
+        self.assertEqual(len(media_kwargs["attributes"]), 1)
+        self.assertEqual(type(media_kwargs["attributes"][0]).__name__, "DocumentAttributeAnimated")
 
 
 @unittest.skipUnless(
