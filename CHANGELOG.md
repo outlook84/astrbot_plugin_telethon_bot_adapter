@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.6.0 - 2026-03-16
+
+### 修复 / Fixed
+
+- 加固 Telethon 连接恢复逻辑：在保留 Telethon 内建自动重连的基础上，新增外层 client 重建与指数退避；对永久性鉴权/会话错误停止重试，对明确的瞬时网络错误继续恢复。
+- `tg status` 新增 Telethon 连接状态展示，便于快速判断当前实例处于已连接、连接中、重连退避中还是已停止。
+
+- Hardened Telethon connection recovery by keeping Telethon's built-in reconnects while adding outer client recreation with exponential backoff; permanent auth/session failures now stop retrying, while known transient network failures continue to recover.
+- Added Telethon connection state to `tg status` so it is easier to tell whether the adapter is connected, connecting, backing off for reconnect, or stopped.
+
 ## 0.5.0 - 2026-03-16
 
 ### 新增 / Added
