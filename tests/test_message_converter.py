@@ -197,7 +197,6 @@ class _FakeAdapter:
     def __init__(self, temp_dir: str, download_incoming_media: bool = True) -> None:
         self.self_id = "999"
         self.self_username = "astrbot"
-        self.trigger_prefix = "-astr"
         self.reply_to_self_triggers_command = False
         self.debug_logging = False
         self.download_incoming_media = download_incoming_media
@@ -306,34 +305,32 @@ class _FakeReplyMessage(_FakeMessage):
 
 
 class MessageConverterTests(unittest.IsolatedAsyncioTestCase):
-    async def test_convert_message_strips_trigger_prefix_and_injects_group_at(self):
+    async def test_convert_group_message_preserves_text_for_astr_wakeup(self):
         module = _load_message_converter_module()
 
         with tempfile.TemporaryDirectory() as temp_dir:
             converter = module.TelethonMessageConverter(_FakeAdapter(temp_dir))
             event = _FakeEvent(
-                _FakeMessage(1, raw_text="-astr hello world"),
+                _FakeMessage(1, raw_text="@astrbot hello world"),
                 _FakeSender(123, username="alice"),
             )
 
             result = await converter.convert_message(event)
 
-        self.assertEqual(result.message_str, "hello world")
+        self.assertEqual(result.message_str, "@astrbot hello world")
         self.assertEqual(result.type, "group")
         self.assertEqual(result.group_id, "100")
-        self.assertEqual(len(result.message), 2)
-        self.assertEqual(type(result.message[0]).__name__, "At")
-        self.assertEqual(result.message[0].qq, "astrbot")
-        self.assertEqual(type(result.message[1]).__name__, "Plain")
-        self.assertEqual(result.message[1].text, "hello world")
+        self.assertEqual(len(result.message), 1)
+        self.assertEqual(type(result.message[0]).__name__, "Plain")
+        self.assertEqual(result.message[0].text, "@astrbot hello world")
 
-    async def test_convert_private_message_strips_trigger_prefix_without_injecting_at(self):
+    async def test_convert_private_message_keeps_plain_text(self):
         module = _load_message_converter_module()
 
         with tempfile.TemporaryDirectory() as temp_dir:
             converter = module.TelethonMessageConverter(_FakeAdapter(temp_dir))
             event = _FakeEvent(
-                _FakeMessage(1, raw_text="-astr tg status"),
+                _FakeMessage(1, raw_text="tg status"),
                 _FakeSender(123, username="alice"),
                 is_private=True,
             )
@@ -356,7 +353,7 @@ class MessageConverterTests(unittest.IsolatedAsyncioTestCase):
             with tempfile.TemporaryDirectory() as temp_dir:
                 converter = module.TelethonMessageConverter(_FakeAdapter(temp_dir))
                 event = _FakeEvent(
-                    _FakeMessage(1, raw_text="-astr hello world"),
+                    _FakeMessage(1, raw_text="hello world"),
                     _FakeSender(123, username="alice"),
                 )
 
@@ -378,7 +375,7 @@ class MessageConverterTests(unittest.IsolatedAsyncioTestCase):
                 adapter.debug_logging = True
                 converter = module.TelethonMessageConverter(adapter)
                 event = _FakeEvent(
-                    _FakeMessage(1, raw_text="-astr hello world"),
+                    _FakeMessage(1, raw_text="hello world"),
                     _FakeSender(123, username="alice"),
                 )
 
@@ -390,7 +387,7 @@ class MessageConverterTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("[Telethon][Debug] convert_message:", capturing_logger.info_calls[0][0][0])
         self.assertIn("[Telethon][Debug] convert_result:", capturing_logger.info_calls[1][0][0])
 
-    async def test_convert_message_removes_self_mention_from_message_str(self):
+    async def test_convert_group_message_preserves_self_mention_text(self):
         module = _load_message_converter_module()
         entity_type = sys.modules["telethon.tl.types"].MessageEntityMention
         entity = entity_type()
@@ -406,14 +403,31 @@ class MessageConverterTests(unittest.IsolatedAsyncioTestCase):
 
             result = await converter.convert_message(event)
 
-        self.assertEqual(result.message_str, " hello")
+        self.assertEqual(result.message_str, "@astrbot hello")
         self.assertEqual(len(result.message), 2)
-        self.assertEqual(type(result.message[0]).__name__, "At")
-        self.assertEqual(result.message[0].qq, "astrbot")
+        self.assertEqual(type(result.message[0]).__name__, "Plain")
+        self.assertEqual(result.message[0].text, "@astrbot")
         self.assertEqual(type(result.message[1]).__name__, "Plain")
         self.assertEqual(result.message[1].text, " hello")
 
-    async def test_convert_group_message_with_empty_prefix_preserves_self_mention_text(self):
+    async def test_convert_group_message_does_not_inject_wakeup_at_without_reply_to_self(self):
+        module = _load_message_converter_module()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            adapter = _FakeAdapter(temp_dir)
+            adapter.reply_to_self_triggers_command = True
+            converter = module.TelethonMessageConverter(adapter)
+            event = _FakeEvent(
+                _FakeMessage(12, raw_text="tg status"),
+                _FakeSender(123, username="alice"),
+            )
+
+            result = await converter.convert_message(event)
+
+        self.assertEqual([type(component).__name__ for component in result.message], ["Plain"])
+        self.assertEqual(result.message[0].text, "tg status")
+
+    async def test_convert_group_mention_message_does_not_synthesize_extra_at_component(self):
         module = _load_message_converter_module()
         entity_type = sys.modules["telethon.tl.types"].MessageEntityMention
         entity = entity_type()
@@ -422,21 +436,18 @@ class MessageConverterTests(unittest.IsolatedAsyncioTestCase):
 
         with tempfile.TemporaryDirectory() as temp_dir:
             adapter = _FakeAdapter(temp_dir)
-            adapter.trigger_prefix = ""
+            adapter.reply_to_self_triggers_command = True
             converter = module.TelethonMessageConverter(adapter)
             event = _FakeEvent(
-                _FakeMessage(1, raw_text="@astrbot hello", entities=[entity]),
+                _FakeMessage(13, raw_text="@astrbot tg status", entities=[entity]),
                 _FakeSender(123, username="alice"),
             )
 
             result = await converter.convert_message(event)
 
-        self.assertEqual(result.message_str, "@astrbot hello")
-        self.assertEqual(len(result.message), 2)
-        self.assertEqual(type(result.message[0]).__name__, "Plain")
+        self.assertEqual([type(component).__name__ for component in result.message], ["Plain", "Plain"])
         self.assertEqual(result.message[0].text, "@astrbot")
-        self.assertEqual(type(result.message[1]).__name__, "Plain")
-        self.assertEqual(result.message[1].text, " hello")
+        self.assertEqual(result.message[1].text, " tg status")
 
     def test_parse_text_components_converts_tg_user_link_to_at(self):
         module = _load_message_converter_module()
@@ -495,52 +506,6 @@ class MessageConverterTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(components[1].qq, "bob")
         self.assertEqual(components[1].name, "bob")
 
-    async def test_convert_message_removes_self_text_url_mention_from_message_str(self):
-        module = _load_message_converter_module()
-        entity_type = sys.modules["telethon.tl.types"].MessageEntityTextUrl
-        entity = entity_type()
-        entity.offset = 0
-        entity.length = 8
-        entity.url = "tg://user?id=999"
-
-        with tempfile.TemporaryDirectory() as temp_dir:
-            converter = module.TelethonMessageConverter(_FakeAdapter(temp_dir))
-            event = _FakeEvent(
-                _FakeMessage(1, raw_text="@astrbot hello", entities=[entity]),
-                _FakeSender(123, username="alice"),
-            )
-
-            result = await converter.convert_message(event)
-
-        self.assertEqual(result.message_str, " hello")
-        self.assertEqual(len(result.message), 2)
-        self.assertEqual(type(result.message[0]).__name__, "At")
-        self.assertEqual(result.message[0].qq, "astrbot")
-        self.assertEqual(type(result.message[1]).__name__, "Plain")
-        self.assertEqual(result.message[1].text, " hello")
-
-    def test_strip_prefix_from_components_handles_split_plain_segments(self):
-        module = _load_message_converter_module()
-        plain_type = sys.modules["astrbot.api.message_components"].Plain
-        at_type = sys.modules["astrbot.api.message_components"].At
-
-        components = [
-            plain_type(text="-a"),
-            plain_type(text="str hello"),
-            at_type(qq="42", name="bob"),
-        ]
-
-        result = module.TelethonMessageConverter.strip_prefix_from_components(
-            components,
-            "-astr",
-        )
-
-        self.assertEqual(len(result), 2)
-        self.assertEqual(type(result[0]).__name__, "Plain")
-        self.assertEqual(result[0].text, "hello")
-        self.assertEqual(type(result[1]).__name__, "At")
-        self.assertEqual(result[1].qq, "42")
-
     async def test_parse_media_components_maps_audio_document(self):
         module = _load_message_converter_module()
         tl_types = sys.modules["telethon.tl.types"]
@@ -596,7 +561,7 @@ class MessageConverterTests(unittest.IsolatedAsyncioTestCase):
             )
             message = _FakeMessage(
                 4,
-                raw_text="-astr ack",
+                raw_text="ack",
                 reply_message=reply_message,
             )
             message.reply_to = types.SimpleNamespace(reply_to_msg_id=99)
@@ -615,10 +580,8 @@ class MessageConverterTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(result.message[0].chain), 1)
         self.assertEqual(type(result.message[0].chain[0]).__name__, "Plain")
         self.assertEqual(result.message[0].chain[0].text, "quoted text")
-        self.assertEqual(type(result.message[1]).__name__, "At")
-        self.assertEqual(result.message[1].qq, "astrbot")
-        self.assertEqual(type(result.message[2]).__name__, "Plain")
-        self.assertEqual(result.message[2].text, "ack")
+        self.assertEqual(type(result.message[1]).__name__, "Plain")
+        self.assertEqual(result.message[1].text, "ack")
 
     async def test_convert_group_reply_to_self_injects_wakeup_at_when_enabled(self):
         module = _load_message_converter_module()
@@ -651,6 +614,10 @@ class MessageConverterTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.message[1].qq, "astrbot")
         self.assertEqual(type(result.message[2]).__name__, "Plain")
         self.assertEqual(result.message[2].text, "tg status")
+        self.assertEqual(
+            [type(component).__name__ for component in result.message].count("At"),
+            1,
+        )
 
     async def test_convert_private_reply_to_self_does_not_inject_wakeup_at(self):
         module = _load_message_converter_module()
@@ -756,7 +723,7 @@ class MessageConverterTests(unittest.IsolatedAsyncioTestCase):
             converter = module.TelethonMessageConverter(_FakeAdapter(temp_dir))
             message = _FakeMessage(
                 5,
-                raw_text="-astr hello topic",
+                raw_text="hello topic",
             )
             message.reply_to = types.SimpleNamespace(
                 reply_to_msg_id=456,
@@ -773,9 +740,8 @@ class MessageConverterTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.type, "group")
         self.assertEqual(result.group_id, "-100123456#456")
         self.assertEqual(result.session_id, "-100123456#456")
-        self.assertEqual(type(result.message[0]).__name__, "At")
-        self.assertEqual(type(result.message[1]).__name__, "Plain")
-        self.assertEqual(result.message[1].text, "hello topic")
+        self.assertEqual(type(result.message[0]).__name__, "Plain")
+        self.assertEqual(result.message[0].text, "hello topic")
 
     async def test_convert_topic_root_reply_does_not_emit_reply_component(self):
         module = _load_message_converter_module()
@@ -784,7 +750,7 @@ class MessageConverterTests(unittest.IsolatedAsyncioTestCase):
             converter = module.TelethonMessageConverter(_FakeAdapter(temp_dir))
             message = _FakeMessage(
                 6,
-                raw_text="-astr in topic",
+                raw_text="in topic",
             )
             message.reply_to = types.SimpleNamespace(
                 reply_to_msg_id=777,
@@ -808,7 +774,7 @@ class MessageConverterTests(unittest.IsolatedAsyncioTestCase):
             converter = module.TelethonMessageConverter(_FakeAdapter(temp_dir))
             message = _FakeMessage(
                 7,
-                raw_text="-astr hi",
+                raw_text="hi",
             )
             message.reply_to = types.SimpleNamespace(
                 forum_topic=True,

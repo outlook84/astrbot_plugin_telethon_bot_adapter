@@ -17,6 +17,16 @@ from astrbot.api.platform import (
     register_platform_adapter,
 )
 from astrbot.core.platform.astr_message_event import MessageSesion
+try:
+    from astrbot.core.star.filter.command import CommandFilter
+    from astrbot.core.star.filter.command_group import CommandGroupFilter
+    from astrbot.core.star.star import star_map
+    from astrbot.core.star.star_handler import star_handlers_registry
+except ImportError:
+    CommandFilter = None
+    CommandGroupFilter = None
+    star_map = {}
+    star_handlers_registry = []
 
 try:
     from astrbot.core.utils.astrbot_path import get_astrbot_temp_path
@@ -27,13 +37,13 @@ try:
 except ImportError:
     ProxyType = None
 
-from telethon import TelegramClient, events
+from telethon import TelegramClient, events, functions, types
 try:
     from telethon import errors as telethon_errors
 except ImportError:
     telethon_errors = None
 from telethon.network import connection
-from telethon.sessions import StringSession
+from telethon.sessions import MemorySession
 from .config import (
     DEFAULT_CONFIG_TEMPLATE,
     TELETHON_CONFIG_METADATA,
@@ -55,8 +65,8 @@ OUTER_RECONNECT_RESET_AFTER_SECONDS = 300.0
 
 
 @register_platform_adapter(
-    "telethon_userbot",
-    "Telethon Userbot 适配器",
+    "telethon_bot",
+    "Telethon Bot 适配器",
     logo_path=str(PLUGIN_ROOT / "logo.png"),
     support_streaming_message=False,
     default_config_tmpl=DEFAULT_CONFIG_TEMPLATE,
@@ -82,6 +92,7 @@ class TelethonPlatformAdapter(Platform):
         self._stop_requested = False
         self._main_task: asyncio.Task | None = None
         self._cleanup_task: asyncio.Task | None = None
+        self._profile_sync_task: asyncio.Task | None = None
         self._retry_sleep_task: asyncio.Task | None = None
         self._reconnect_attempt = 0
         self._next_reconnect_at_monotonic: float | None = None
@@ -93,14 +104,13 @@ class TelethonPlatformAdapter(Platform):
         self._downloaded_temp_files: dict[str, float] = {}
         self._media_temp_dir = self._build_media_temp_dir()
         self._message_converter = TelethonMessageConverter(self)
+        self._last_command_signature: tuple[tuple[str, str], ...] | None = None
 
     def meta(self) -> PlatformMetadata:
-        adapter_id = str(self.config.get("id") or "telethon_userbot")
+        adapter_id = str(self.config.get("id") or "telethon_bot")
         return PlatformMetadata(
-            # AstrBot core uses platform_meta.name as the canonical adapter type
-            # for platform filters and compatibility checks.
-            name="telethon_userbot",
-            description="Telethon Userbot Adapter",
+            name="telethon_bot",
+            description="Telethon Bot Adapter",
             id=adapter_id,
             support_streaming_message=False,
         )
@@ -189,6 +199,13 @@ class TelethonPlatformAdapter(Platform):
             except asyncio.CancelledError:
                 pass
 
+        if self._profile_sync_task and not self._profile_sync_task.done():
+            self._profile_sync_task.cancel()
+            try:
+                await self._profile_sync_task
+            except asyncio.CancelledError:
+                pass
+
         for entry in self._media_group_cache.values():
             task = entry.get("task")
             if task and not task.done():
@@ -196,6 +213,7 @@ class TelethonPlatformAdapter(Platform):
         self._media_group_cache.clear()
         await self._cleanup_expired_temp_files(force=True)
         self._remove_media_temp_dir_if_empty()
+        await self._cleanup_bot_profile()
         await self._disconnect_current_client()
 
     async def send_by_session(
@@ -247,33 +265,33 @@ class TelethonPlatformAdapter(Platform):
 
     async def _run_client_once(self, client_kwargs: dict[str, Any]) -> None:
         self.client = self._create_client(client_kwargs)
-        await self.client.connect()
+        await self.client.start(bot_token=self.bot_token)
         if not await self.client.is_user_authorized():
             raise RuntimeError(
-                "[Telethon] The current session_string is unauthorized. Regenerate a valid StringSession."
+                "[Telethon] The current bot_token is unauthorized. Please check the configured bot token."
             )
 
         me = await self.client.get_me()
         self.self_id = str(me.id)
         self.self_username = str(getattr(me, "username", "") or "").strip().lower()
+        await self._sync_bot_profile()
+        self._start_profile_sync_task()
 
         logger.info(
-            "[Telethon] Userbot started: %s username=%s "
+            "[Telethon] Bot started: %s username=%s "
             "download_incoming_media=%s incoming_media_ttl_seconds=%s "
-            "trigger_prefix=%r reply_to_self_triggers_command=%s log_processed_messages_only=%s proxy_type=%s "
+            "reply_to_self_triggers_command=%s debug_logging=%s proxy_type=%s "
             "proxy_host=%s proxy_port=%s raw_config=%s",
             self.self_id,
             self.self_username,
             self.download_incoming_media,
             self.incoming_media_ttl_seconds,
-            self.trigger_prefix,
             self.reply_to_self_triggers_command,
-            self.log_processed_messages_only,
+            self.debug_logging,
             self.proxy_type or "direct",
             self.proxy_host or "",
             self.proxy_port or 0,
             {
-                "trigger_prefix": self.config.get("trigger_prefix"),
                 "reply_to_self_triggers_command": self.config.get(
                     "reply_to_self_triggers_command"
                 ),
@@ -281,9 +299,7 @@ class TelethonPlatformAdapter(Platform):
                 "incoming_media_ttl_seconds": self.config.get(
                     "incoming_media_ttl_seconds"
                 ),
-                "log_processed_messages_only": self.config.get(
-                    "log_processed_messages_only"
-                ),
+                "debug_logging": self.config.get("debug_logging"),
                 "proxy_type": self.config.get("proxy_type"),
                 "proxy_host": self.config.get("proxy_host"),
                 "proxy_port": self.config.get("proxy_port"),
@@ -294,19 +310,221 @@ class TelethonPlatformAdapter(Platform):
             self._on_new_message,
             events.NewMessage(incoming=True, outgoing=False),
         )
-        self.client.add_event_handler(
-            self._on_new_message,
-            events.NewMessage(incoming=False, outgoing=True),
-        )
-        if not self.log_processed_messages_only:
+        if self.debug_logging:
             self.client.add_event_handler(self._on_raw_event, events.Raw())
 
         self._main_task = asyncio.create_task(self.client.run_until_disconnected())
         await self._main_task
 
+    async def _sync_bot_profile(self) -> None:
+        if not self.client:
+            return
+        await self._sync_bot_commands()
+        await self._apply_menu_button()
+
+    async def _sync_bot_commands(self) -> None:
+        if not self.client or not self.sync_bot_commands:
+            return
+
+        try:
+            commands = self._collect_commands()
+            if not commands:
+                return
+
+            command_signature = tuple(
+                (command.command, command.description) for command in commands
+            )
+            if command_signature == self._last_command_signature:
+                return
+
+            await self.client(
+                functions.bots.SetBotCommandsRequest(
+                    scope=types.BotCommandScopeDefault(),
+                    lang_code="",
+                    commands=commands,
+                )
+            )
+            self._last_command_signature = command_signature
+            logger.info(
+                "[Telethon] Synced %s bot commands to Telegram",
+                len(commands),
+            )
+        except Exception as exc:
+            logger.error("[Telethon] Failed to sync bot commands: %s", exc)
+
+    async def _apply_menu_button(self) -> None:
+        if not self.client or self.menu_button_mode == "disabled":
+            return
+
+        try:
+            if self.menu_button_mode == "commands":
+                button = types.BotMenuButtonCommands()
+            else:
+                button = types.BotMenuButtonDefault()
+
+            await self.client(
+                functions.bots.SetBotMenuButtonRequest(
+                    user_id=types.InputUserSelf(),
+                    button=button,
+                )
+            )
+            logger.info(
+                "[Telethon] Applied menu button mode: %s",
+                self.menu_button_mode,
+            )
+        except Exception as exc:
+            logger.error(
+                "[Telethon] Failed to apply menu button mode %s: %s",
+                self.menu_button_mode,
+                exc,
+            )
+
+    def _start_profile_sync_task(self) -> None:
+        if self._profile_sync_task and not self._profile_sync_task.done():
+            self._profile_sync_task.cancel()
+        if not self.command_auto_refresh:
+            self._profile_sync_task = None
+            return
+        if not self.sync_bot_commands and self.menu_button_mode == "disabled":
+            self._profile_sync_task = None
+            return
+        self._profile_sync_task = asyncio.create_task(self._profile_sync_loop())
+
+    async def _profile_sync_loop(self) -> None:
+        try:
+            while not self._stop_requested:
+                await asyncio.sleep(self.command_refresh_interval)
+                if self._stop_requested or not self.client:
+                    break
+                await self._sync_bot_profile()
+        except asyncio.CancelledError:
+            raise
+
+    async def _cleanup_bot_profile(self) -> None:
+        if not self.client:
+            return
+
+        if self.sync_bot_commands:
+            try:
+                await self.client(
+                    functions.bots.SetBotCommandsRequest(
+                        scope=types.BotCommandScopeDefault(),
+                        lang_code="",
+                        commands=[],
+                    )
+                )
+                self._last_command_signature = None
+            except Exception as exc:
+                logger.error(
+                    "[Telethon] Failed to clear bot commands during shutdown: %s",
+                    exc,
+                )
+
+        if self.menu_button_mode != "disabled":
+            try:
+                await self.client(
+                    functions.bots.SetBotMenuButtonRequest(
+                        user_id=types.InputUserSelf(),
+                        button=types.BotMenuButtonDefault(),
+                    )
+                )
+            except Exception as exc:
+                logger.error(
+                    "[Telethon] Failed to reset menu button during shutdown: %s",
+                    exc,
+                )
+
+    def _collect_commands(self) -> list[types.BotCommand]:
+        if CommandFilter is None or CommandGroupFilter is None:
+            return []
+
+        command_dict: dict[str, str] = {}
+        skip_commands = {"start"}
+
+        for handler_metadata in star_handlers_registry:
+            plugin = star_map.get(handler_metadata.handler_module_path)
+            if plugin is None or not getattr(plugin, "activated", False):
+                continue
+            if not getattr(handler_metadata, "enabled", False):
+                continue
+            for event_filter in getattr(handler_metadata, "event_filters", []):
+                for cmd_name, description in self._extract_command_info(
+                    event_filter,
+                    handler_metadata,
+                    skip_commands,
+                ):
+                    if cmd_name in command_dict:
+                        logger.warning(
+                            "[Telethon] Duplicate command registration ignored: %s",
+                            cmd_name,
+                        )
+                        continue
+                    command_dict[cmd_name] = description
+
+        return [
+            types.BotCommand(command=cmd_name, description=command_dict[cmd_name])
+            for cmd_name in sorted(command_dict)
+        ]
+
+    @staticmethod
+    def _extract_command_info(
+        event_filter: Any,
+        handler_metadata: Any,
+        skip_commands: set[str],
+    ) -> list[tuple[str, str]]:
+        cmd_names: list[str] = []
+        is_group = False
+
+        if CommandFilter is not None and isinstance(event_filter, CommandFilter):
+            command_name = getattr(event_filter, "command_name", "")
+            if not command_name:
+                return []
+            parent_command_names = getattr(event_filter, "parent_command_names", None)
+            if parent_command_names and parent_command_names != [""]:
+                return []
+            cmd_names = [command_name]
+            alias = getattr(event_filter, "alias", None) or []
+            cmd_names.extend(alias)
+        elif CommandGroupFilter is not None and isinstance(event_filter, CommandGroupFilter):
+            if getattr(event_filter, "parent_group", None):
+                return []
+            group_name = getattr(event_filter, "group_name", "")
+            if not group_name:
+                return []
+            cmd_names = [group_name]
+            is_group = True
+
+        result: list[tuple[str, str]] = []
+        for cmd_name in cmd_names:
+            if not cmd_name or cmd_name in skip_commands:
+                continue
+            if not re.match(r"^[a-z0-9_]+$", cmd_name) or len(cmd_name) > 32:
+                continue
+            description = TelethonPlatformAdapter._build_command_description(
+                handler_metadata,
+                cmd_name,
+                is_group=is_group,
+            )
+            result.append((cmd_name, description))
+        return result
+
+    @staticmethod
+    def _build_command_description(
+        handler_metadata: Any,
+        cmd_name: str,
+        *,
+        is_group: bool,
+    ) -> str:
+        description = getattr(handler_metadata, "desc", "") or (
+            f"Command group: {cmd_name}" if is_group else f"Command: {cmd_name}"
+        )
+        if len(description) > 30:
+            description = description[:30] + "..."
+        return description
+
     def _create_client(self, client_kwargs: dict[str, Any]) -> TelegramClient:
         return TelegramClient(
-            StringSession(self.session_string),
+            MemorySession(),
             self.api_id,
             self.api_hash,
             **client_kwargs,
@@ -317,6 +535,15 @@ class TelethonPlatformAdapter(Platform):
         task = self._main_task
         self.client = None
         self._main_task = None
+        profile_sync_task = self._profile_sync_task
+        self._profile_sync_task = None
+
+        if profile_sync_task and not profile_sync_task.done():
+            profile_sync_task.cancel()
+            try:
+                await profile_sync_task
+            except asyncio.CancelledError:
+                pass
 
         if client:
             try:
@@ -357,7 +584,7 @@ class TelethonPlatformAdapter(Platform):
         if isinstance(exc, ValueError):
             return True
         message = str(exc).lower()
-        if "unauthorized" in message or "session_string" in message:
+        if "unauthorized" in message or "bot_token" in message:
             return True
         if telethon_errors and isinstance(
             exc,
@@ -488,7 +715,7 @@ class TelethonPlatformAdapter(Platform):
         validate_config(self)
 
     def _log_unprocessed(self, message: str, *args: Any) -> None:
-        if not self.log_processed_messages_only:
+        if self.debug_logging:
             logger.info(message, *args)
 
     async def _on_new_message(self, event: events.NewMessage.Event) -> None:
@@ -554,22 +781,10 @@ class TelethonPlatformAdapter(Platform):
             )
             return
 
-        raw_text = str(getattr(event.message, "raw_text", "") or "")
         is_private = self._message_converter.resolve_is_private(
             event.message,
             getattr(event, "is_private", False),
         )
-        if self.trigger_prefix and not raw_text.startswith(self.trigger_prefix):
-            if not await self._message_converter.should_treat_reply_to_self_as_command(
-                event.message,
-                is_private=is_private,
-            ):
-                self._log_unprocessed(
-                    "[Telethon] Ignoring message: missing trigger_prefix %r text=%r",
-                    self.trigger_prefix,
-                    raw_text,
-                )
-                return
 
         try:
             abm = await self._convert_message(event, include_reply=True)
@@ -694,34 +909,7 @@ class TelethonPlatformAdapter(Platform):
         session_id, grouped_id = cache_key
         events_list = sorted(events_list, key=lambda e: int(getattr(e.message, "id", 0)))
 
-        trigger_event = None
-        if self.trigger_prefix:
-            for candidate in events_list:
-                raw_text = str(getattr(candidate.message, "raw_text", "") or "")
-                if raw_text.startswith(self.trigger_prefix):
-                    trigger_event = candidate
-                    break
-            if trigger_event is None:
-                for candidate in events_list:
-                    if await self._message_converter.should_treat_reply_to_self_as_command(
-                        candidate.message,
-                        is_private=self._message_converter.resolve_is_private(
-                            candidate.message,
-                            getattr(candidate, "is_private", False),
-                        ),
-                    ):
-                        trigger_event = candidate
-                        break
-            if trigger_event is None:
-                self._log_unprocessed(
-                    "[Telethon] Ignoring media group: missing trigger_prefix %r session_id=%s grouped_id=%s",
-                    self.trigger_prefix,
-                    session_id,
-                    grouped_id,
-                )
-                return
-        else:
-            trigger_event = events_list[0]
+        trigger_event = events_list[0]
 
         try:
             merged = await self._convert_message(trigger_event, include_reply=True)
@@ -796,11 +984,11 @@ class TelethonPlatformAdapter(Platform):
             except Exception:
                 logger.warning(
                     "[Telethon] Failed to get AstrBot temp directory, falling back to the system temp directory: adapter_id=%s",
-                    self.config.get("id") or "telethon_userbot",
+                    self.config.get("id") or "telethon_bot",
                     exc_info=True,
                 )
 
-        adapter_id = str(self.config.get("id") or "telethon_userbot").strip() or "telethon_userbot"
+        adapter_id = str(self.config.get("id") or "telethon_bot").strip() or "telethon_bot"
         safe_adapter_id = re.sub(r"[^A-Za-z0-9_.-]+", "_", adapter_id)
         return os.path.join(base_dir, f"telethon_adapter_{safe_adapter_id}")
 

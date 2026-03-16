@@ -1,8 +1,6 @@
 import asyncio
 import importlib.util
-import os
 import sys
-import tempfile
 import types
 import unittest
 from pathlib import Path
@@ -12,9 +10,12 @@ def _install_astrbot_stubs() -> None:
     astrbot_module = types.ModuleType("astrbot")
     api_module = types.ModuleType("astrbot.api")
     event_module = types.ModuleType("astrbot.api.event")
-    message_components_module = types.ModuleType("astrbot.api.message_components")
     platform_module = types.ModuleType("astrbot.api.platform")
     astr_message_event_module = types.ModuleType("astrbot.core.platform.astr_message_event")
+    command_filter_module = types.ModuleType("astrbot.core.star.filter.command")
+    command_group_filter_module = types.ModuleType("astrbot.core.star.filter.command_group")
+    star_module = types.ModuleType("astrbot.core.star.star")
+    star_handler_module = types.ModuleType("astrbot.core.star.star_handler")
 
     class _Logger:
         def info(self, *args, **kwargs):
@@ -32,53 +33,6 @@ def _install_astrbot_stubs() -> None:
         def exception(self, *args, **kwargs):
             return None
 
-    class MessageChain:
-        pass
-
-    class _BaseComponent:
-        def __init__(self, **kwargs):
-            for key, value in kwargs.items():
-                setattr(self, key, value)
-
-    class At(_BaseComponent):
-        pass
-
-    class File(_BaseComponent):
-        pass
-
-    class Image(_BaseComponent):
-        pass
-
-    class Location(_BaseComponent):
-        pass
-
-    class Plain(_BaseComponent):
-        pass
-
-    class Record(_BaseComponent):
-        pass
-
-    class Reply(_BaseComponent):
-        pass
-
-    class Video(_BaseComponent):
-        pass
-
-    class AstrBotMessage:
-        pass
-
-    class MessageMember(_BaseComponent):
-        pass
-
-    class MessageType:
-        GROUP_MESSAGE = "group"
-        FRIEND_MESSAGE = "friend"
-
-    class PlatformMetadata:
-        def __init__(self, **kwargs):
-            for key, value in kwargs.items():
-                setattr(self, key, value)
-
     class Platform:
         def __init__(self, platform_config, event_queue):
             self.config = platform_config
@@ -86,6 +40,14 @@ def _install_astrbot_stubs() -> None:
 
         def commit_event(self, event):
             return None
+
+    class PlatformMetadata:
+        def __init__(self, **kwargs):
+            for key, value in kwargs.items():
+                setattr(self, key, value)
+
+    class MessageChain:
+        pass
 
     def register_platform_adapter(*args, **kwargs):
         def decorator(cls):
@@ -96,30 +58,39 @@ def _install_astrbot_stubs() -> None:
     class MessageSesion:
         pass
 
+    class CommandFilter:
+        def __init__(self, command_name="", alias=None, parent_command_names=None):
+            self.command_name = command_name
+            self.alias = alias or []
+            self.parent_command_names = parent_command_names
+
+    class CommandGroupFilter:
+        def __init__(self, group_name="", alias=None, parent_group=None):
+            self.group_name = group_name
+            self.alias = alias or []
+            self.parent_group = parent_group
+
     api_module.logger = _Logger()
     event_module.MessageChain = MessageChain
-    message_components_module.At = At
-    message_components_module.File = File
-    message_components_module.Image = Image
-    message_components_module.Location = Location
-    message_components_module.Plain = Plain
-    message_components_module.Record = Record
-    message_components_module.Reply = Reply
-    message_components_module.Video = Video
-    platform_module.AstrBotMessage = AstrBotMessage
-    platform_module.MessageMember = MessageMember
-    platform_module.MessageType = MessageType
     platform_module.Platform = Platform
     platform_module.PlatformMetadata = PlatformMetadata
+    platform_module.AstrBotMessage = type("AstrBotMessage", (), {})
     platform_module.register_platform_adapter = register_platform_adapter
     astr_message_event_module.MessageSesion = MessageSesion
+    command_filter_module.CommandFilter = CommandFilter
+    command_group_filter_module.CommandGroupFilter = CommandGroupFilter
+    star_module.star_map = {}
+    star_handler_module.star_handlers_registry = []
 
     sys.modules["astrbot"] = astrbot_module
     sys.modules["astrbot.api"] = api_module
     sys.modules["astrbot.api.event"] = event_module
-    sys.modules["astrbot.api.message_components"] = message_components_module
     sys.modules["astrbot.api.platform"] = platform_module
     sys.modules["astrbot.core.platform.astr_message_event"] = astr_message_event_module
+    sys.modules["astrbot.core.star.filter.command"] = command_filter_module
+    sys.modules["astrbot.core.star.filter.command_group"] = command_group_filter_module
+    sys.modules["astrbot.core.star.star"] = star_module
+    sys.modules["astrbot.core.star.star_handler"] = star_handler_module
 
 
 def _install_pydantic_stubs() -> None:
@@ -156,55 +127,16 @@ def _install_telethon_stubs() -> None:
     connection_module = types.ModuleType("telethon.network.connection")
     sessions_module = types.ModuleType("telethon.sessions")
     events_module = types.ModuleType("telethon.events")
-    tl_module = types.ModuleType("telethon.tl")
-    tl_types_module = types.ModuleType("telethon.tl.types")
+    functions_module = types.ModuleType("telethon.functions")
+    functions_bots_module = types.ModuleType("telethon.functions.bots")
+    types_module = types.ModuleType("telethon.types")
 
     class TelegramClient:
         def __init__(self, *args, **kwargs):
             return None
 
-    class _RPCError(Exception):
-        pass
-
-    class UnauthorizedError(_RPCError):
-        pass
-
-    class AuthKeyError(_RPCError):
-        pass
-
-    class BadRequestError(_RPCError):
-        pass
-
-    class ForbiddenError(_RPCError):
-        pass
-
-    class NotFoundError(_RPCError):
-        pass
-
-    class InvalidDCError(_RPCError):
-        pass
-
-    class ServerError(_RPCError):
-        pass
-
-    class TimedOutError(_RPCError):
-        pass
-
-    class FloodError(_RPCError):
-        pass
-
-    class AuthKeyNotFound(Exception):
-        pass
-
-    class SecurityError(Exception):
-        pass
-
-    class InvalidBufferError(BufferError):
-        pass
-
-    class StringSession:
-        def __init__(self, value):
-            self.value = value
+        async def __call__(self, request):
+            return request
 
     class _EventFactory:
         def __call__(self, *args, **kwargs):
@@ -220,45 +152,55 @@ def _install_telethon_stubs() -> None:
         def __call__(self, *args, **kwargs):
             return ("raw", args, kwargs)
 
-    def _stub_type(name):
-        return type(name, (), {})
+    class MemorySession:
+        pass
+
+    class SetBotMenuButtonRequest:
+        def __init__(self, user_id, button):
+            self.user_id = user_id
+            self.button = button
+
+    class SetBotCommandsRequest:
+        def __init__(self, scope, lang_code, commands):
+            self.scope = scope
+            self.lang_code = lang_code
+            self.commands = commands
+
+    class BotCommand:
+        def __init__(self, command, description):
+            self.command = command
+            self.description = description
+
+    class BotMenuButtonCommands:
+        pass
+
+    class BotMenuButtonDefault:
+        pass
+
+    class BotCommandScopeDefault:
+        pass
+
+    class InputUserSelf:
+        pass
 
     telethon_module.TelegramClient = TelegramClient
     telethon_module.events = events_module
     telethon_module.errors = errors_module
+    telethon_module.functions = functions_module
+    telethon_module.types = types_module
     network_module.connection = connection_module
-    sessions_module.StringSession = StringSession
+    sessions_module.MemorySession = MemorySession
     events_module.NewMessage = _NewMessage()
     events_module.Raw = _Raw()
-    errors_module.RPCError = _RPCError
-    errors_module.UnauthorizedError = UnauthorizedError
-    errors_module.AuthKeyError = AuthKeyError
-    errors_module.BadRequestError = BadRequestError
-    errors_module.ForbiddenError = ForbiddenError
-    errors_module.NotFoundError = NotFoundError
-    errors_module.InvalidDCError = InvalidDCError
-    errors_module.ServerError = ServerError
-    errors_module.TimedOutError = TimedOutError
-    errors_module.FloodError = FloodError
     errors_module.common = errors_common_module
-    errors_common_module.AuthKeyNotFound = AuthKeyNotFound
-    errors_common_module.SecurityError = SecurityError
-    errors_common_module.InvalidBufferError = InvalidBufferError
-
-    for name in [
-        "DocumentAttributeAudio",
-        "DocumentAttributeFilename",
-        "DocumentAttributeSticker",
-        "DocumentAttributeVideo",
-        "GeoPointEmpty",
-        "MessageEntityMention",
-        "MessageEntityMentionName",
-        "MessageEntityTextUrl",
-        "MessageMediaContact",
-        "MessageMediaGeo",
-        "MessageMediaGeoLive",
-    ]:
-        setattr(tl_types_module, name, _stub_type(name))
+    functions_module.bots = functions_bots_module
+    functions_bots_module.SetBotMenuButtonRequest = SetBotMenuButtonRequest
+    functions_bots_module.SetBotCommandsRequest = SetBotCommandsRequest
+    types_module.BotCommand = BotCommand
+    types_module.BotMenuButtonCommands = BotMenuButtonCommands
+    types_module.BotMenuButtonDefault = BotMenuButtonDefault
+    types_module.BotCommandScopeDefault = BotCommandScopeDefault
+    types_module.InputUserSelf = InputUserSelf
 
     sys.modules["telethon"] = telethon_module
     sys.modules["telethon.errors"] = errors_module
@@ -267,8 +209,9 @@ def _install_telethon_stubs() -> None:
     sys.modules["telethon.network.connection"] = connection_module
     sys.modules["telethon.sessions"] = sessions_module
     sys.modules["telethon.events"] = events_module
-    sys.modules["telethon.tl"] = tl_module
-    sys.modules["telethon.tl.types"] = tl_types_module
+    sys.modules["telethon.functions"] = functions_module
+    sys.modules["telethon.functions.bots"] = functions_bots_module
+    sys.modules["telethon.types"] = types_module
 
 
 def _install_local_module_stubs() -> None:
@@ -279,862 +222,255 @@ def _install_local_module_stubs() -> None:
         def __init__(self, adapter):
             self.adapter = adapter
 
-        @staticmethod
-        def extract_thread_id(message):
-            reply_to = getattr(message, "reply_to", None)
-            return str(getattr(reply_to, "reply_to_top_id", "")) or None
-
-        @staticmethod
-        def build_session_id(chat_id, thread_id, *, is_private):
-            if is_private or not thread_id:
-                return chat_id
-            return f"{chat_id}#{thread_id}"
-
-        @staticmethod
-        def resolve_is_private(message, event_is_private=False):
-            if event_is_private:
-                return True
-            peer = getattr(message, "peer_id", None)
-            return type(peer).__name__ == "PeerUser"
-
-        @staticmethod
-        def is_topic_service_message(message):
-            action = getattr(message, "action", None)
-            return type(action).__name__.startswith("MessageActionTopic") if action is not None else False
-
-        async def should_treat_reply_to_self_as_command(self, message, *, is_private):
-            return bool(
-                getattr(self.adapter, "reply_to_self_triggers_command", False)
-                and getattr(message, "reply_to_self_trigger", False)
-                and not is_private
-            )
-
     telethon_event_module.TelethonEvent = type("TelethonEvent", (), {})
     message_converter_module.TelethonMessageConverter = TelethonMessageConverter
-
     sys.modules["telethon_adapter.telethon_event"] = telethon_event_module
     sys.modules["telethon_adapter.message_converter"] = message_converter_module
 
 
-def _load_adapter_module():
+def _load_modules():
     for module_name in list(sys.modules):
         if module_name == "telethon_adapter" or module_name.startswith("telethon_adapter."):
             sys.modules.pop(module_name, None)
+
     _install_astrbot_stubs()
     _install_pydantic_stubs()
     _install_telethon_stubs()
     _install_local_module_stubs()
-    package_module = types.ModuleType("telethon_adapter")
-    package_module.__path__ = [str(Path(__file__).resolve().parents[1] / "telethon_adapter")]
-    sys.modules["telethon_adapter"] = package_module
-    module_path = Path(__file__).resolve().parents[1] / "telethon_adapter" / "telethon_adapter.py"
-    spec = importlib.util.spec_from_file_location(
-        "telethon_adapter.telethon_adapter",
-        module_path,
-    )
-    module = importlib.util.module_from_spec(spec)
-    assert spec and spec.loader
-    spec.loader.exec_module(module)
-    return module
 
+    package_name = "telethon_adapter"
+    package_path = Path(__file__).resolve().parents[1] / package_name
+    package_module = types.ModuleType(package_name)
+    package_module.__path__ = [str(package_path)]
+    sys.modules[package_name] = package_module
 
-def _load_message_converter_module():
-    for module_name in list(sys.modules):
-        if module_name == "telethon_adapter" or module_name.startswith("telethon_adapter."):
-            sys.modules.pop(module_name, None)
-    _install_astrbot_stubs()
-    _install_pydantic_stubs()
-    _install_telethon_stubs()
-    package_module = types.ModuleType("telethon_adapter")
-    package_module.__path__ = [str(Path(__file__).resolve().parents[1] / "telethon_adapter")]
-    sys.modules["telethon_adapter"] = package_module
-
-    lazy_media_module = types.ModuleType("telethon_adapter.lazy_media")
-    lazy_media_module.LazyFile = type("LazyFile", (), {})
-    lazy_media_module.LazyImage = type("LazyImage", (), {})
-    lazy_media_module.LazyRecord = type("LazyRecord", (), {})
-    lazy_media_module.LazyVideo = type("LazyVideo", (), {})
-    lazy_media_module.TelethonLazyMedia = type("TelethonLazyMedia", (), {})
-    sys.modules["telethon_adapter.lazy_media"] = lazy_media_module
-
-    module_path = Path(__file__).resolve().parents[1] / "telethon_adapter" / "message_converter.py"
-    spec = importlib.util.spec_from_file_location(
-        "telethon_adapter.message_converter",
-        module_path,
-    )
-    module = importlib.util.module_from_spec(spec)
-    assert spec and spec.loader
-    spec.loader.exec_module(module)
-    return module
+    loaded = {}
+    for module_name in ["i18n", "config", "telethon_adapter"]:
+        full_name = f"{package_name}.{module_name}"
+        module_path = package_path / f"{module_name}.py"
+        spec = importlib.util.spec_from_file_location(full_name, module_path)
+        module = importlib.util.module_from_spec(spec)
+        assert spec and spec.loader
+        sys.modules[full_name] = module
+        spec.loader.exec_module(module)
+        loaded[module_name] = module
+    return loaded["config"], loaded["telethon_adapter"]
 
 
 class ConfigValidationTests(unittest.TestCase):
-    def test_init_tolerates_dirty_numeric_config(self):
-        module = _load_adapter_module()
-        adapter = module.TelethonPlatformAdapter(
-            {
-                "api_id": "bad",
-                "incoming_media_ttl_seconds": "",
-                "telethon_media_group_timeout": "oops",
-                "telethon_media_group_max_wait": None,
-                "proxy_port": "abc",
-                "proxy_type": "mtproxy",
-            },
-            {},
-            asyncio.Queue(),
-        )
+    def test_default_template_uses_bot_token(self):
+        config_module, _ = _load_modules()
 
-        self.assertEqual(adapter.api_id, 0)
-        self.assertEqual(adapter.incoming_media_ttl_seconds, 600.0)
-        self.assertEqual(adapter.media_group_timeout, 1.2)
-        self.assertEqual(adapter.media_group_max_wait, 8.0)
-        self.assertEqual(adapter.proxy_port, 0)
-        self.assertEqual(adapter.proxy_type, "mtproto")
-        self.assertFalse(adapter.debug_logging)
+        self.assertIn("bot_token", config_module.DEFAULT_CONFIG_TEMPLATE)
+        self.assertNotIn("session_string", config_module.DEFAULT_CONFIG_TEMPLATE)
+        self.assertEqual(config_module.DEFAULT_CONFIG_TEMPLATE["menu_button_mode"], "commands")
 
-    def test_init_parses_debug_logging_flag(self):
-        module = _load_adapter_module()
-        adapter = module.TelethonPlatformAdapter(
+    def test_adapter_init_parses_bot_config(self):
+        _, adapter_module = _load_modules()
+        adapter = adapter_module.TelethonPlatformAdapter(
             {
                 "api_id": 123,
                 "api_hash": "hash",
-                "session_string": "session",
-                "debug_logging": "true",
-            },
-            {},
-            asyncio.Queue(),
-        )
-
-        self.assertTrue(adapter.debug_logging)
-
-    def test_init_parses_reply_to_self_triggers_command_flag(self):
-        module = _load_adapter_module()
-        adapter = module.TelethonPlatformAdapter(
-            {
-                "api_id": 123,
-                "api_hash": "hash",
-                "session_string": "session",
+                "bot_token": "123:abc",
                 "reply_to_self_triggers_command": "true",
+                "debug_logging": "true",
+                "telethon_command_register": "false",
+                "telethon_command_auto_refresh": "false",
+                "telethon_command_register_interval": "123",
+                "menu_button_mode": "commands",
             },
             {},
             asyncio.Queue(),
         )
 
+        self.assertEqual(adapter.bot_token, "123:abc")
         self.assertTrue(adapter.reply_to_self_triggers_command)
+        self.assertTrue(adapter.debug_logging)
+        self.assertFalse(adapter.sync_bot_commands)
+        self.assertFalse(adapter.command_auto_refresh)
+        self.assertEqual(adapter.command_refresh_interval, 123)
+        self.assertEqual(adapter.menu_button_mode, "commands")
+        self.assertEqual(adapter.meta().name, "telethon_bot")
+        self.assertEqual(adapter.meta().id, "telethon_bot")
 
-    def test_validate_config_reports_invalid_required_field(self):
-        module = _load_adapter_module()
-        adapter = module.TelethonPlatformAdapter(
-            {
-                "api_id": "bad",
-                "api_hash": "hash",
-                "session_string": "session",
-            },
-            {},
-            asyncio.Queue(),
+    def test_validate_config_requires_bot_token(self):
+        config_module, _ = _load_modules()
+        adapter = types.SimpleNamespace(
+            config={"api_id": 123, "api_hash": "hash", "bot_token": "", "language": "zh-CN"},
+            api_id=123,
+            api_hash="hash",
+            bot_token="",
+            language="zh-CN",
+            proxy_type="",
+            proxy_host="",
+            proxy_port=0,
+            proxy_secret="",
+            command_refresh_interval=300,
+            menu_button_mode="disabled",
+            media_group_timeout=1.2,
+            media_group_max_wait=8.0,
         )
 
-        with self.assertRaisesRegex(ValueError, "api_id.*'bad'.*API ID"):
-            adapter._validate_config()
+        with self.assertRaises(ValueError) as context:
+            config_module.validate_config(adapter)
 
-    def test_validate_config_reports_invalid_proxy_settings(self):
-        module = _load_adapter_module()
-        adapter = module.TelethonPlatformAdapter(
+        self.assertIn("bot token", str(context.exception).lower())
+
+    def test_validate_config_rejects_invalid_menu_button_mode(self):
+        config_module, _ = _load_modules()
+        adapter = types.SimpleNamespace(
+            config={
+                "api_id": 123,
+                "api_hash": "hash",
+                "bot_token": "123:abc",
+                "language": "zh-CN",
+                "menu_button_mode": "web_app",
+            },
+            api_id=123,
+            api_hash="hash",
+            bot_token="123:abc",
+            language="zh-CN",
+            proxy_type="",
+            proxy_host="",
+            proxy_port=0,
+            proxy_secret="",
+            command_refresh_interval=300,
+            menu_button_mode="web_app",
+            media_group_timeout=1.2,
+            media_group_max_wait=8.0,
+        )
+
+        with self.assertRaises(ValueError) as context:
+            config_module.validate_config(adapter)
+
+        self.assertIn("menu", str(context.exception).lower())
+
+    def test_validate_config_rejects_invalid_command_refresh_interval(self):
+        config_module, _ = _load_modules()
+        adapter = types.SimpleNamespace(
+            config={
+                "api_id": 123,
+                "api_hash": "hash",
+                "bot_token": "123:abc",
+                "language": "zh-CN",
+                "telethon_command_register_interval": 0,
+                "menu_button_mode": "disabled",
+            },
+            api_id=123,
+            api_hash="hash",
+            bot_token="123:abc",
+            language="zh-CN",
+            proxy_type="",
+            proxy_host="",
+            proxy_port=0,
+            proxy_secret="",
+            command_refresh_interval=0,
+            menu_button_mode="disabled",
+            media_group_timeout=1.2,
+            media_group_max_wait=8.0,
+        )
+
+        with self.assertRaises(ValueError) as context:
+            config_module.validate_config(adapter)
+
+        self.assertIn("telethon_command_register_interval", str(context.exception))
+
+    def test_legacy_command_config_names_still_work(self):
+        _, adapter_module = _load_modules()
+        adapter = adapter_module.TelethonPlatformAdapter(
             {
                 "api_id": 123,
                 "api_hash": "hash",
-                "session_string": "session",
-                "proxy_type": "http",
-                "proxy_host": "",
-                "proxy_port": "abc",
+                "bot_token": "123:abc",
+                "sync_bot_commands": "false",
+                "telethon_command_refresh_interval": "456",
             },
             {},
             asyncio.Queue(),
         )
 
-        with self.assertRaisesRegex(ValueError, "proxy_host.*''.*代理主机"):
-            adapter._validate_config()
+        self.assertFalse(adapter.sync_bot_commands)
+        self.assertEqual(adapter.command_refresh_interval, 456)
 
-    def test_validate_config_reports_invalid_required_field_in_english(self):
-        module = _load_adapter_module()
-        adapter = module.TelethonPlatformAdapter(
-            {
-                "api_id": "bad",
-                "api_hash": "hash",
-                "session_string": "session",
-                "language": "en-US",
-            },
+    def test_collect_commands_includes_top_level_commands_and_groups(self):
+        _, adapter_module = _load_modules()
+        command_filter_module = sys.modules["astrbot.core.star.filter.command"]
+        command_group_filter_module = sys.modules["astrbot.core.star.filter.command_group"]
+        star_module = sys.modules["astrbot.core.star.star"]
+        star_handler_module = sys.modules["astrbot.core.star.star_handler"]
+
+        star_module.star_map["plugin.enabled"] = types.SimpleNamespace(activated=True)
+        star_handler_module.star_handlers_registry[:] = [
+            types.SimpleNamespace(
+                handler_module_path="plugin.enabled",
+                enabled=True,
+                desc="Status description",
+                event_filters=[
+                    command_filter_module.CommandFilter(
+                        command_name="status",
+                        alias=["state"],
+                        parent_command_names=None,
+                    ),
+                    command_group_filter_module.CommandGroupFilter(
+                        group_name="admin",
+                        parent_group=None,
+                    ),
+                    command_filter_module.CommandFilter(
+                        command_name="sub",
+                        alias=[],
+                        parent_command_names=["admin"],
+                    ),
+                ],
+            )
+        ]
+
+        adapter = adapter_module.TelethonPlatformAdapter(
+            {"api_id": 123, "api_hash": "hash", "bot_token": "123:abc"},
             {},
             asyncio.Queue(),
         )
-
-        with self.assertRaisesRegex(
-            ValueError,
-            r"api_id.*'bad'.*positive integer API ID",
-        ):
-            adapter._validate_config()
-
-    def test_validate_config_requires_mtproto_proxy_secret(self):
-        module = _load_adapter_module()
-        adapter = module.TelethonPlatformAdapter(
-            {
-                "api_id": 123,
-                "api_hash": "hash",
-                "session_string": "session",
-                "proxy_type": "mtproto",
-                "proxy_host": "127.0.0.1",
-                "proxy_port": "443",
-                "proxy_secret": "",
-            },
-            {},
-            asyncio.Queue(),
-        )
-
-        with self.assertRaisesRegex(ValueError, "proxy_secret.*''.*MTProto"):
-            adapter._validate_config()
-
-    def test_validate_config_allows_non_positive_media_ttl(self):
-        module = _load_adapter_module()
-        adapter = module.TelethonPlatformAdapter(
-            {
-                "api_id": 123,
-                "api_hash": "hash",
-                "session_string": "session",
-                "incoming_media_ttl_seconds": "-1",
-                "telethon_media_group_timeout": "0",
-                "telethon_media_group_max_wait": "1",
-            },
-            {},
-            asyncio.Queue(),
-        )
-
-        adapter._validate_config()
-
-    def test_build_client_kwargs_supports_socks5_proxy_tuple(self):
-        module = _load_adapter_module()
-        module.ProxyType = types.SimpleNamespace(
-            SOCKS5="SOCKS5",
-            SOCKS4="SOCKS4",
-            HTTP="HTTP",
-        )
-        adapter = module.TelethonPlatformAdapter(
-            {
-                "api_id": 123,
-                "api_hash": "hash",
-                "session_string": "session",
-                "proxy_type": "socks5",
-                "proxy_host": "127.0.0.1",
-                "proxy_port": "1080",
-                "proxy_rdns": True,
-                "proxy_username": "user",
-                "proxy_password": "pass",
-            },
-            {},
-            asyncio.Queue(),
-        )
-
-        kwargs = adapter._build_client_kwargs()
+        commands = adapter._collect_commands()
 
         self.assertEqual(
-            kwargs,
-            {
-                "auto_reconnect": True,
-                "connection_retries": 5,
-                "proxy": (
-                    "SOCKS5",
-                    "127.0.0.1",
-                    1080,
-                    True,
-                    "user",
-                    "pass",
-                ),
-                "retry_delay": 1,
-            },
+            [(command.command, command.description) for command in commands],
+            [
+                ("admin", "Status description"),
+                ("state", "Status description"),
+                ("status", "Status description"),
+            ],
         )
 
-    def test_build_client_kwargs_supports_mtproto_proxy_tuple(self):
-        module = _load_adapter_module()
-        mtproto_connection = object()
-        module.connection.ConnectionTcpMTProxyRandomizedIntermediate = mtproto_connection
-        adapter = module.TelethonPlatformAdapter(
-            {
-                "api_id": 123,
-                "api_hash": "hash",
-                "session_string": "session",
-                "proxy_type": "mtproto",
-                "proxy_host": "127.0.0.1",
-                "proxy_port": "443",
-                "proxy_secret": "deadbeef",
-            },
+    def test_collect_commands_truncates_description_like_builtin_adapter(self):
+        _, adapter_module = _load_modules()
+        long_description = "x" * 40
+
+        description = adapter_module.TelethonPlatformAdapter._build_command_description(
+            types.SimpleNamespace(desc=long_description),
+            "status",
+            is_group=False,
+        )
+
+        self.assertEqual(description, ("x" * 30) + "...")
+
+    def test_sync_bot_commands_swallows_client_errors(self):
+        _, adapter_module = _load_modules()
+
+        class _FailingClient:
+            async def __call__(self, request):
+                raise RuntimeError("boom")
+
+        adapter = adapter_module.TelethonPlatformAdapter(
+            {"api_id": 123, "api_hash": "hash", "bot_token": "123:abc"},
             {},
             asyncio.Queue(),
         )
-
-        kwargs = adapter._build_client_kwargs()
-
-        self.assertTrue(kwargs["auto_reconnect"])
-        self.assertEqual(kwargs["connection_retries"], 5)
-        self.assertEqual(kwargs["connection"], mtproto_connection)
-        self.assertEqual(kwargs["proxy"], ("127.0.0.1", 443, "deadbeef"))
-        self.assertEqual(kwargs["retry_delay"], 1)
-
-    def test_build_client_kwargs_includes_explicit_telethon_reconnect_defaults(self):
-        module = _load_adapter_module()
-        adapter = module.TelethonPlatformAdapter(
-            {
-                "api_id": 123,
-                "api_hash": "hash",
-                "session_string": "session",
-            },
-            {},
-            asyncio.Queue(),
-        )
-
-        kwargs = adapter._build_client_kwargs()
-
-        self.assertEqual(
-            kwargs,
-            {
-                "auto_reconnect": True,
-                "connection_retries": 5,
-                "retry_delay": 1,
-            },
-        )
-
-
-class AdapterBehaviorTests(unittest.IsolatedAsyncioTestCase):
-    async def test_should_retry_client_error_distinguishes_telethon_error_types(self):
-        module = _load_adapter_module()
-        adapter = module.TelethonPlatformAdapter(
-            {
-                "api_id": 123,
-                "api_hash": "hash",
-                "session_string": "session",
-            },
-            {},
-            asyncio.Queue(),
-        )
-
-        self.assertTrue(adapter._should_retry_client_error(module.telethon_errors.ServerError()))
-        self.assertTrue(adapter._should_retry_client_error(module.telethon_errors.TimedOutError()))
-        self.assertFalse(adapter._should_retry_client_error(module.telethon_errors.AuthKeyError()))
-        self.assertFalse(
-            adapter._should_retry_client_error(module.telethon_errors.common.AuthKeyNotFound())
-        )
-        self.assertFalse(adapter._should_retry_client_error(RuntimeError("network parser bug")))
-
-    async def test_run_recreates_client_after_disconnect(self):
-        module = _load_adapter_module()
-        adapter = module.TelethonPlatformAdapter(
-            {
-                "api_id": 123,
-                "api_hash": "hash",
-                "session_string": "session",
-            },
-            {},
-            asyncio.Queue(),
-        )
-        sleep_delays = []
-        created_clients = []
-
-        class _FakeClient:
-            def __init__(self, index):
-                self.index = index
-                self.handlers = []
-                self.disconnect_calls = 0
-
-            async def connect(self):
-                return None
-
-            async def is_user_authorized(self):
-                return True
-
-            async def get_me(self):
-                return types.SimpleNamespace(id=1000 + self.index, username=f"user{self.index}")
-
-            def add_event_handler(self, handler, event):
-                self.handlers.append((handler, event))
-
-            async def run_until_disconnected(self):
-                if self.index >= 2:
-                    adapter._stop_requested = True
-                return None
-
-            async def disconnect(self):
-                self.disconnect_calls += 1
-
-        def fake_create_client(client_kwargs):
-            self.assertTrue(client_kwargs["auto_reconnect"])
-            self.assertEqual(client_kwargs["connection_retries"], 5)
-            self.assertEqual(client_kwargs["retry_delay"], 1)
-            client = _FakeClient(len(created_clients) + 1)
-            created_clients.append(client)
-            return client
-
-        async def fake_sleep(delay):
-            sleep_delays.append(delay)
-
-        adapter._create_client = fake_create_client
-        adapter._sleep_before_reconnect = fake_sleep
-
-        await adapter.run()
-
-        self.assertEqual(len(created_clients), 2)
-        self.assertEqual(sleep_delays, [1.0])
-        self.assertEqual(adapter.self_id, "1002")
-        self.assertEqual(adapter.self_username, "user2")
-        self.assertGreaterEqual(created_clients[0].disconnect_calls, 1)
-        self.assertGreaterEqual(created_clients[1].disconnect_calls, 1)
-        self.assertEqual(len(created_clients[0].handlers), 2)
-
-    async def test_run_does_not_retry_unauthorized_session(self):
-        module = _load_adapter_module()
-        adapter = module.TelethonPlatformAdapter(
-            {
-                "api_id": 123,
-                "api_hash": "hash",
-                "session_string": "session",
-            },
-            {},
-            asyncio.Queue(),
-        )
-        created_clients = []
-        sleep_delays = []
-
-        class _FakeClient:
-            async def connect(self):
-                return None
-
-            async def is_user_authorized(self):
-                return False
-
-            async def disconnect(self):
-                return None
-
-        def fake_create_client(client_kwargs):
-            created_clients.append(client_kwargs)
-            return _FakeClient()
-
-        async def fake_sleep(delay):
-            sleep_delays.append(delay)
-
-        adapter._create_client = fake_create_client
-        adapter._sleep_before_reconnect = fake_sleep
-
-        with self.assertRaisesRegex(RuntimeError, "unauthorized"):
-            await adapter.run()
-
-        self.assertEqual(len(created_clients), 1)
-        self.assertEqual(sleep_delays, [])
-
-    async def test_run_stops_retrying_when_clean_disconnect_leaves_session_unauthorized(self):
-        module = _load_adapter_module()
-        adapter = module.TelethonPlatformAdapter(
-            {
-                "api_id": 123,
-                "api_hash": "hash",
-                "session_string": "session",
-            },
-            {},
-            asyncio.Queue(),
-        )
-        created_clients = []
-        sleep_delays = []
-
-        class _FakeClient:
-            def __init__(self):
-                self.handlers = []
-                self.authorized_checks = 0
-
-            async def connect(self):
-                return None
-
-            async def is_user_authorized(self):
-                self.authorized_checks += 1
-                return self.authorized_checks == 1
-
-            async def get_me(self):
-                return types.SimpleNamespace(id=1001, username="user1")
-
-            def add_event_handler(self, handler, event):
-                self.handlers.append((handler, event))
-
-            async def run_until_disconnected(self):
-                return None
-
-            async def disconnect(self):
-                return None
-
-        def fake_create_client(client_kwargs):
-            created_clients.append(client_kwargs)
-            return _FakeClient()
-
-        async def fake_sleep(delay):
-            sleep_delays.append(delay)
-
-        adapter._create_client = fake_create_client
-        adapter._sleep_before_reconnect = fake_sleep
-
-        with self.assertRaisesRegex(RuntimeError, "no longer authorized"):
-            await adapter.run()
-
-        self.assertEqual(len(created_clients), 1)
-        self.assertEqual(sleep_delays, [])
-
-    async def test_on_new_message_allows_group_bot_sender_by_default(self):
-        module = _load_adapter_module()
-        adapter = module.TelethonPlatformAdapter(
-            {
-                "api_id": 123,
-                "api_hash": "hash",
-                "session_string": "session",
-                "trigger_prefix": "-astr",
-            },
-            {},
-            asyncio.Queue(),
-        )
-        adapter._running = True
-        converted = []
-        committed = []
-
-        async def fake_convert_message(event, include_reply=True):
-            converted.append((event.message.id, include_reply))
-            return types.SimpleNamespace(
-                message_id=str(event.message.id),
-                message_str=event.message.raw_text,
-                message=[],
-                sender=types.SimpleNamespace(user_id="777", nickname="bot"),
-                session_id=str(event.chat_id),
-                type="group",
-            )
-
-        class _Event:
-            def __init__(self):
-                self.chat_id = "100"
-                self.sender_id = "777"
-                self.is_private = False
-                self.message = types.SimpleNamespace(
-                    id=10,
-                    raw_text="-astr hello",
-                    grouped_id=None,
-                    out=False,
-                )
-
-            async def get_sender(self):
-                return types.SimpleNamespace(id=777, bot=True)
-
-        adapter._convert_message = fake_convert_message
-        adapter._commit_abm = committed.append
-
-        await adapter._on_new_message(_Event())
-
-        self.assertEqual(converted, [(10, True)])
-        self.assertEqual(len(committed), 1)
-
-    async def test_process_grouped_message_merges_items_and_uses_prefixed_trigger(self):
-        module = _load_adapter_module()
-        adapter = module.TelethonPlatformAdapter(
-            {
-                "api_id": 123,
-                "api_hash": "hash",
-                "session_string": "session",
-                "trigger_prefix": "-astr",
-            },
-            {},
-            asyncio.Queue(),
-        )
-        converted_calls = []
-        committed = []
-
-        def make_abm(message_id: str, message_str: str, parts: list[str]):
-            return types.SimpleNamespace(
-                message_id=message_id,
-                message_str=message_str,
-                message=list(parts),
-                sender=types.SimpleNamespace(user_id="42", nickname="alice"),
-                session_id="100",
-            )
-
-        async def fake_convert_message(event, include_reply=True):
-            converted_calls.append((event.message.id, include_reply))
-            if event.message.id == 11:
-                return make_abm("11", "caption", ["head"])
-            return make_abm(str(event.message.id), "", [f"part-{event.message.id}"])
-
-        adapter._convert_message = fake_convert_message
-        adapter._commit_abm = committed.append
-
-        event1 = types.SimpleNamespace(
-            chat_id="100",
-            sender_id="42",
-            message=types.SimpleNamespace(id=10, raw_text="", reply_to=None),
-        )
-        event2 = types.SimpleNamespace(
-            chat_id="100",
-            sender_id="42",
-            message=types.SimpleNamespace(id=11, raw_text="-astr caption", reply_to=None),
-        )
-        adapter._media_group_cache[("100", 999)] = {
-            "created_at": 0.0,
-            "items": [event1, event2],
-            "task": None,
-        }
-
-        await adapter._process_grouped_message(("100", 999), delay=0)
-
-        self.assertEqual(converted_calls, [(11, True), (10, False)])
-        self.assertEqual(len(committed), 1)
-        self.assertEqual(committed[0].message_str, "caption")
-        self.assertEqual(committed[0].message, ["head", "part-10"])
-
-    async def test_on_new_message_ignores_topic_service_message(self):
-        module = _load_adapter_module()
-        adapter = module.TelethonPlatformAdapter(
-            {
-                "api_id": 123,
-                "api_hash": "hash",
-                "session_string": "session",
-            },
-            {},
-            asyncio.Queue(),
-        )
-        adapter._running = True
-        converted = []
-        committed = []
-
-        async def fake_convert_message(event, include_reply=True):
-            converted.append((event.message.id, include_reply))
-            return types.SimpleNamespace(session_id=str(event.chat_id), message_str="", message=[], sender=None)
-
-        adapter._convert_message = fake_convert_message
-        adapter._commit_abm = committed.append
-
-        class _Event:
-            def __init__(self):
-                self.chat_id = "100"
-                self.sender_id = "777"
-                self.is_private = False
-                self.message = types.SimpleNamespace(
-                    id=15,
-                    raw_text="",
-                    grouped_id=None,
-                    out=False,
-                    action=type("MessageActionTopicCreate", (), {})(),
-                )
-
-            async def get_sender(self):
-                return types.SimpleNamespace(id=777, bot=True)
-
-        await adapter._on_new_message(_Event())
-
-        self.assertEqual(converted, [])
-        self.assertEqual(committed, [])
-
-    async def test_on_new_message_allows_reply_to_self_trigger_without_prefix(self):
-        module = _load_adapter_module()
-        adapter = module.TelethonPlatformAdapter(
-            {
-                "api_id": 123,
-                "api_hash": "hash",
-                "session_string": "session",
-                "trigger_prefix": "-astr",
-                "reply_to_self_triggers_command": True,
-            },
-            {},
-            asyncio.Queue(),
-        )
-        adapter._running = True
-        converted = []
-        committed = []
-
-        async def fake_convert_message(event, include_reply=True):
-            converted.append((event.message.id, include_reply))
-            return types.SimpleNamespace(
-                message_id=str(event.message.id),
-                message_str=event.message.raw_text,
-                message=[],
-                sender=types.SimpleNamespace(user_id="123", nickname="alice"),
-                session_id=str(event.chat_id),
-                type="group",
-            )
-
-        class _Event:
-            def __init__(self):
-                self.chat_id = "100"
-                self.sender_id = "123"
-                self.is_private = False
-                self.message = types.SimpleNamespace(
-                    id=16,
-                    raw_text="tg status",
-                    grouped_id=None,
-                    out=False,
-                    reply_to_self_trigger=True,
-                )
-
-            async def get_sender(self):
-                return types.SimpleNamespace(id=123, bot=False)
-
-        adapter._convert_message = fake_convert_message
-        adapter._commit_abm = committed.append
-
-        await adapter._on_new_message(_Event())
-
-        self.assertEqual(converted, [(16, True)])
-        self.assertEqual(len(committed), 1)
-
-    async def test_grouped_message_session_id_includes_topic_thread(self):
-        module = _load_adapter_module()
-        adapter = module.TelethonPlatformAdapter(
-            {
-                "api_id": 123,
-                "api_hash": "hash",
-                "session_string": "session",
-            },
-            {},
-            asyncio.Queue(),
-        )
-
-        event = types.SimpleNamespace(
-            chat_id="-100123",
-            is_private=False,
-            message=types.SimpleNamespace(
-                peer_id=type("PeerChannel", (), {})(),
-                reply_to=types.SimpleNamespace(reply_to_top_id=456),
-            ),
-        )
-
-        session_id = adapter._grouped_message_session_id(event)
-
-        self.assertEqual(session_id, "-100123#456")
-
-    async def test_process_grouped_message_keeps_topic_cache_separate(self):
-        module = _load_adapter_module()
-        adapter = module.TelethonPlatformAdapter(
-            {
-                "api_id": 123,
-                "api_hash": "hash",
-                "session_string": "session",
-                "trigger_prefix": "",
-            },
-            {},
-            asyncio.Queue(),
-        )
-        committed = []
-
-        async def fake_convert_message(event, include_reply=True):
-            return types.SimpleNamespace(
-                message_id=str(event.message.id),
-                message_str=f"text-{event.message.id}",
-                message=[f"part-{event.message.id}"],
-                sender=types.SimpleNamespace(user_id="42", nickname="alice"),
-                session_id=f"{event.chat_id}#{event.message.reply_to.reply_to_top_id}",
-            )
-
-        adapter._convert_message = fake_convert_message
-        adapter._commit_abm = committed.append
-
-        event_topic_1 = types.SimpleNamespace(
-            chat_id="-100500",
-            sender_id="42",
-            message=types.SimpleNamespace(
-                id=21,
-                raw_text="",
-                reply_to=types.SimpleNamespace(reply_to_top_id=301),
-            ),
-        )
-        event_topic_2 = types.SimpleNamespace(
-            chat_id="-100500",
-            sender_id="42",
-            message=types.SimpleNamespace(
-                id=22,
-                raw_text="",
-                reply_to=types.SimpleNamespace(reply_to_top_id=302),
-            ),
-        )
-        adapter._media_group_cache[("-100500#301", 999)] = {
-            "created_at": 0.0,
-            "items": [event_topic_1],
-            "task": None,
-        }
-        adapter._media_group_cache[("-100500#302", 999)] = {
-            "created_at": 0.0,
-            "items": [event_topic_2],
-            "task": None,
-        }
-
-        await adapter._process_grouped_message(("-100500#301", 999), delay=0)
-        await adapter._process_grouped_message(("-100500#302", 999), delay=0)
-
-        self.assertEqual([item.session_id for item in committed], ["-100500#301", "-100500#302"])
-
-    async def test_message_converter_peer_user_fallback_sets_friend_message_type(self):
-        module = _load_message_converter_module()
-        adapter = types.SimpleNamespace(trigger_prefix="-astr", self_id="", self_username="")
-        converter = module.TelethonMessageConverter(adapter)
-
-        class _Event:
-            def __init__(self):
-                self.chat_id = "42"
-                self.is_private = False
-                self.message = types.SimpleNamespace(
-                    id=14,
-                    raw_text="hello",
-                    reply_to=None,
-                    media=None,
-                    entities=None,
-                )
-
-            async def get_sender(self):
-                return types.SimpleNamespace(id=42, username="alice")
-
-        event = _Event()
-        event.message.peer_id = type("PeerUser", (), {})()
-
-        abm = await converter.convert_message(event, include_reply=True)
-
-        self.assertEqual(abm.type, "friend")
-        self.assertEqual(abm.session_id, "42")
-        self.assertFalse(hasattr(abm, "group_id"))
-
-
-    async def test_cleanup_expired_temp_files_removes_expired_entries_and_empty_dir(self):
-        module = _load_adapter_module()
-        adapter = module.TelethonPlatformAdapter(
-            {
-                "api_id": 123,
-                "api_hash": "hash",
-                "session_string": "session",
-            },
-            {},
-            asyncio.Queue(),
-        )
-
-        with tempfile.TemporaryDirectory() as temp_dir:
-            expired = os.path.join(temp_dir, "expired.bin")
-            alive = os.path.join(temp_dir, "alive.bin")
-            Path(expired).write_bytes(b"expired")
-            Path(alive).write_bytes(b"alive")
-            adapter._media_temp_dir = temp_dir
-            adapter._downloaded_temp_files = {
-                os.path.abspath(expired): 0.0,
-                os.path.abspath(alive): asyncio.get_running_loop().time() + 60,
-            }
-
-            await adapter._cleanup_expired_temp_files(force=False)
-
-            self.assertFalse(os.path.exists(expired))
-            self.assertTrue(os.path.exists(alive))
-            self.assertEqual(
-                adapter._downloaded_temp_files,
-                {os.path.abspath(alive): adapter._downloaded_temp_files[os.path.abspath(alive)]},
-            )
-
-            await adapter._cleanup_expired_temp_files(force=True)
-
-            self.assertFalse(os.path.exists(alive))
-            self.assertEqual(adapter._downloaded_temp_files, {})
-            self.assertFalse(os.path.exists(temp_dir))
-
-
-if __name__ == "__main__":
-    unittest.main()
+        adapter.client = _FailingClient()
+        adapter.sync_bot_commands = True
+        adapter._collect_commands = lambda: [
+            types.SimpleNamespace(command="status", description="desc")
+        ]
+
+        async def _run():
+            await adapter._sync_bot_commands()
+
+        asyncio.run(_run())

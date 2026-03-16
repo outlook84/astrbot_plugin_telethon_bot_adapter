@@ -66,7 +66,7 @@ class _FakeSwapMemory:
 
 
 class _FakePlatformMeta:
-    id = "telethon_userbot"
+    id = "telethon_bot"
 
 
 class _FakeSession:
@@ -82,7 +82,7 @@ class _FakeAdapter:
 
     @staticmethod
     def meta():
-        return types.SimpleNamespace(name="telethon_userbot", id="telethon_userbot")
+        return types.SimpleNamespace(name="telethon_bot", id="telethon_bot")
 
     @staticmethod
     def get_reconnect_status():
@@ -242,7 +242,7 @@ class TelethonStatusServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("AstrBot 版本: <code>4.20.0</code>", text)
         self.assertIn("Telethon 版本: <code>1.41.2.dev1</code>", text)
         self.assertIn("插件版本: <code>", text)
-        self.assertIn("适配器 ID: <code>telethon_userbot</code>", text)
+        self.assertIn("适配器 ID: <code>telethon_bot</code>", text)
         self.assertIn("数据中心: <code>🇳🇱 荷兰阿姆斯特丹（DC2）</code>", text)
         self.assertIn("系统 CPU: <code>42.5%</code>", text)
         self.assertIn("系统内存: <code>37.5%</code>", text)

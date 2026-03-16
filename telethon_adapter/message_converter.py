@@ -108,7 +108,6 @@ class TelethonMessageConverter:
             session_id=self.build_session_id(chat_id, thread_id, is_private=is_private),
             is_private=is_private,
             include_reply=include_reply,
-            strip_trigger_prefix=True,
             reply_to_self_triggers_command=reply_to_self_triggers_command,
         )
 
@@ -120,7 +119,6 @@ class TelethonMessageConverter:
         session_id: str,
         is_private: bool,
         include_reply: bool,
-        strip_trigger_prefix: bool,
         reply_to_self_triggers_command: bool = False,
     ) -> AstrBotMessage:
         sender_name = (
@@ -150,7 +148,7 @@ class TelethonMessageConverter:
             message.type = MessageType.GROUP_MESSAGE
             message.group_id = session_id
 
-        preserve_group_mention_wakeup = not is_private and not self.adapter.trigger_prefix
+        preserve_group_mention_wakeup = not is_private
         if preserve_group_mention_wakeup:
             message.message_str = msg.raw_text or ""
         else:
@@ -160,15 +158,6 @@ class TelethonMessageConverter:
             )
 
         inject_self_at = reply_to_self_triggers_command and not is_private
-        if (
-            strip_trigger_prefix
-            and self.adapter.trigger_prefix
-            and message.message_str.startswith(self.adapter.trigger_prefix)
-        ):
-            message.message_str = message.message_str[
-                len(self.adapter.trigger_prefix) :
-            ].lstrip()
-            inject_self_at = not is_private
 
         thread_id = None if is_private else self.extract_thread_id(msg)
         if (
@@ -214,7 +203,6 @@ class TelethonMessageConverter:
                             ),
                             is_private=reply_is_private,
                             include_reply=False,
-                            strip_trigger_prefix=False,
                             reply_to_self_triggers_command=False,
                         )
                     except Exception:
@@ -248,11 +236,6 @@ class TelethonMessageConverter:
             getattr(msg, "entities", None),
             preserve_self_mentions=preserve_group_mention_wakeup,
         )
-        if strip_trigger_prefix and self.adapter.trigger_prefix:
-            text_components = self.strip_prefix_from_components(
-                text_components,
-                self.adapter.trigger_prefix,
-            )
         if inject_self_at:
             text_components = [
                 At(qq=message.self_id, name=message.self_id),

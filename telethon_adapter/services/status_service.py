@@ -195,7 +195,7 @@ class TelethonStatusService:
                 meta = inst.meta()
             except Exception:
                 continue
-            if getattr(meta, "name", None) != "telethon_userbot":
+            if getattr(meta, "name", None) != "telethon_bot":
                 continue
             if event_client is not None and getattr(inst, "client", None) is event_client:
                 return inst

@@ -8,17 +8,28 @@ FIELD_SPECS = {
     "id": {"type": "string"},
     "api_id": {"type": "int"},
     "api_hash": {"type": "string"},
-    "session_string": {"type": "text"},
+    "bot_token": {"type": "text"},
     "language": {
         "type": "string",
         "options": ["zh-CN", "en-US"],
     },
-    "trigger_prefix": {"type": "string"},
     "reply_to_self_triggers_command": {"type": "bool"},
+    "telethon_command_register": {"type": "bool"},
+    "menu_button_mode": {
+        "type": "string",
+        "options": ["disabled", "commands"],
+    },
     "download_incoming_media": {"type": "bool"},
     "incoming_media_ttl_seconds": {"type": "float"},
-    "log_processed_messages_only": {"type": "bool"},
     "debug_logging": {"type": "bool"},
+    "telethon_command_auto_refresh": {
+        "type": "bool",
+        "invisible": True,
+    },
+    "telethon_command_register_interval": {
+        "type": "int",
+        "invisible": True,
+    },
     "telethon_media_group_timeout": {"type": "float"},
     "telethon_media_group_max_wait": {"type": "float"},
     "proxy_type": {
@@ -60,17 +71,19 @@ TELETHON_CONFIG_METADATA = _build_config_metadata()
 TELETHON_I18N_RESOURCES = _build_i18n_resources()
 
 DEFAULT_CONFIG_TEMPLATE = {
-    "id": "telethon_userbot",
+    "id": "telethon_bot",
     "api_id": 123456,
     "api_hash": "your_api_hash",
-    "session_string": "",
+    "bot_token": "123456:your_bot_token",
     "language": DEFAULT_LANGUAGE,
-    "trigger_prefix": "-astr",
     "reply_to_self_triggers_command": False,
     "download_incoming_media": True,
     "incoming_media_ttl_seconds": 600.0,
-    "log_processed_messages_only": True,
     "debug_logging": False,
+    "telethon_command_register": True,
+    "telethon_command_auto_refresh": True,
+    "telethon_command_register_interval": 300,
+    "menu_button_mode": "commands",
     "telethon_media_group_timeout": 1.2,
     "telethon_media_group_max_wait": 8.0,
     "proxy_type": "",
@@ -152,12 +165,24 @@ def normalize_proxy_type(value: Any) -> str:
     return proxy_type
 
 
+def _first_config_value(config: Any, *keys: str) -> Any:
+    if not isinstance(config, dict):
+        return None
+    for key in keys:
+        if key in config:
+            return config.get(key)
+    return None
+
+
+def normalize_menu_button_mode(value: Any) -> str:
+    return parse_str(value, "commands").lower()
+
+
 def apply_config(adapter: Any) -> None:
     adapter.api_id = parse_int(adapter.config.get("api_id"), 0)
     adapter.api_hash = parse_str(adapter.config.get("api_hash"), "")
-    adapter.session_string = parse_str(adapter.config.get("session_string"), "")
+    adapter.bot_token = parse_str(adapter.config.get("bot_token"), "")
     adapter.language = parse_str(adapter.config.get("language"), DEFAULT_LANGUAGE)
-    adapter.trigger_prefix = parse_str(adapter.config.get("trigger_prefix"), "")
     adapter.reply_to_self_triggers_command = parse_bool(
         adapter.config.get("reply_to_self_triggers_command"), False
     )
@@ -168,11 +193,26 @@ def apply_config(adapter: Any) -> None:
         adapter.config.get("incoming_media_ttl_seconds"),
         600.0,
     )
-    adapter.log_processed_messages_only = parse_bool(
-        adapter.config.get("log_processed_messages_only"), True
-    )
     adapter.debug_logging = parse_bool(
         adapter.config.get("debug_logging"), False
+    )
+    adapter.sync_bot_commands = parse_bool(
+        _first_config_value(adapter.config, "telethon_command_register", "sync_bot_commands"),
+        True,
+    )
+    adapter.command_auto_refresh = parse_bool(
+        adapter.config.get("telethon_command_auto_refresh"), True
+    )
+    adapter.command_refresh_interval = parse_int(
+        _first_config_value(
+            adapter.config,
+            "telethon_command_register_interval",
+            "telethon_command_refresh_interval",
+        ),
+        300,
+    )
+    adapter.menu_button_mode = normalize_menu_button_mode(
+        adapter.config.get("menu_button_mode")
     )
     adapter.media_group_timeout = parse_float(
         adapter.config.get("telethon_media_group_timeout"),
@@ -231,11 +271,11 @@ def validate_config(adapter: Any) -> None:
             t(language, "config.api_hash.invalid"),
             language=language,
         )
-    if not adapter.session_string:
+    if not adapter.bot_token:
         raise config_error(
-            "session_string",
-            adapter.config.get("session_string"),
-            t(language, "config.session_string.invalid"),
+            "bot_token",
+            adapter.config.get("bot_token"),
+            t(language, "config.bot_token.invalid"),
             language=language,
         )
     if adapter.language not in {"zh-CN", "en-US"}:
@@ -243,6 +283,24 @@ def validate_config(adapter: Any) -> None:
             "language",
             adapter.config.get("language"),
             t(language, "config.language.invalid"),
+            language=language,
+        )
+    if adapter.menu_button_mode not in {"disabled", "commands"}:
+        raise config_error(
+            "menu_button_mode",
+            adapter.config.get("menu_button_mode"),
+            t(language, "config.menu_button_mode.invalid"),
+            language=language,
+        )
+    if adapter.command_refresh_interval <= 0:
+        raise config_error(
+            "telethon_command_register_interval",
+            _first_config_value(
+                adapter.config,
+                "telethon_command_register_interval",
+                "telethon_command_refresh_interval",
+            ),
+            t(language, "config.command_refresh_interval.invalid"),
             language=language,
         )
 
