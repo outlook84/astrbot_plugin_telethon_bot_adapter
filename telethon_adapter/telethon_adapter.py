@@ -114,19 +114,23 @@ class TelethonPlatformAdapter(Platform):
             logger.info(
                 "[Telethon] Userbot started: %s username=%s "
                 "download_incoming_media=%s incoming_media_ttl_seconds=%s "
-                "trigger_prefix=%r log_processed_messages_only=%s proxy_type=%s "
+                "trigger_prefix=%r reply_to_self_triggers_command=%s log_processed_messages_only=%s proxy_type=%s "
                 "proxy_host=%s proxy_port=%s raw_config=%s",
                 self.self_id,
                 self.self_username,
                 self.download_incoming_media,
                 self.incoming_media_ttl_seconds,
                 self.trigger_prefix,
+                self.reply_to_self_triggers_command,
                 self.log_processed_messages_only,
                 self.proxy_type or "direct",
                 self.proxy_host or "",
                 self.proxy_port or 0,
                 {
                     "trigger_prefix": self.config.get("trigger_prefix"),
+                    "reply_to_self_triggers_command": self.config.get(
+                        "reply_to_self_triggers_command"
+                    ),
                     "download_incoming_media": self.config.get("download_incoming_media"),
                     "incoming_media_ttl_seconds": self.config.get(
                         "incoming_media_ttl_seconds"
@@ -339,13 +343,21 @@ class TelethonPlatformAdapter(Platform):
             return
 
         raw_text = str(getattr(event.message, "raw_text", "") or "")
+        is_private = self._message_converter.resolve_is_private(
+            event.message,
+            getattr(event, "is_private", False),
+        )
         if self.trigger_prefix and not raw_text.startswith(self.trigger_prefix):
-            self._log_unprocessed(
-                "[Telethon] Ignoring message: missing trigger_prefix %r text=%r",
-                self.trigger_prefix,
-                raw_text,
-            )
-            return
+            if not await self._message_converter.should_treat_reply_to_self_as_command(
+                event.message,
+                is_private=is_private,
+            ):
+                self._log_unprocessed(
+                    "[Telethon] Ignoring message: missing trigger_prefix %r text=%r",
+                    self.trigger_prefix,
+                    raw_text,
+                )
+                return
 
         try:
             abm = await self._convert_message(event, include_reply=True)
@@ -478,6 +490,17 @@ class TelethonPlatformAdapter(Platform):
                     trigger_event = candidate
                     break
             if trigger_event is None:
+                for candidate in events_list:
+                    if await self._message_converter.should_treat_reply_to_self_as_command(
+                        candidate.message,
+                        is_private=self._message_converter.resolve_is_private(
+                            candidate.message,
+                            getattr(candidate, "is_private", False),
+                        ),
+                    ):
+                        trigger_event = candidate
+                        break
+            if trigger_event is None:
                 self._log_unprocessed(
                     "[Telethon] Ignoring media group: missing trigger_prefix %r session_id=%s grouped_id=%s",
                     self.trigger_prefix,
@@ -537,10 +560,10 @@ class TelethonPlatformAdapter(Platform):
 
     def _grouped_message_session_id(self, event: events.NewMessage.Event) -> str:
         message = getattr(event, "message", None)
-        peer = getattr(message, "peer_id", None)
-        is_private = bool(getattr(event, "is_private", False))
-        if not is_private and type(peer).__name__ == "PeerUser":
-            is_private = True
+        is_private = self._message_converter.resolve_is_private(
+            message,
+            getattr(event, "is_private", False),
+        )
         chat_id = str(getattr(event, "chat_id", ""))
         thread_id = None if is_private else self._message_converter.extract_thread_id(message)
         return self._message_converter.build_session_id(

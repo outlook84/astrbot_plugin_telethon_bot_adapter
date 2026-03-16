@@ -27,17 +27,63 @@ class TelethonMessageConverter:
     def __init__(self, adapter: Any) -> None:
         self.adapter = adapter
 
+    async def should_treat_reply_to_self_as_command(
+        self,
+        msg: Any,
+        *,
+        is_private: bool,
+    ) -> bool:
+        if is_private or not getattr(self.adapter, "reply_to_self_triggers_command", False):
+            return False
+
+        reply_to = getattr(msg, "reply_to", None)
+        if getattr(reply_to, "reply_to_msg_id", None) is None:
+            return False
+        if self._is_topic_root_reply(msg, self.extract_thread_id(msg)):
+            return False
+
+        try:
+            reply_msg = await msg.get_reply_message()
+        except Exception as e:
+            logger.warning(
+                "[Telethon] Failed to inspect replied message for self-trigger detection: chat_id=%s message_id=%s reply_to=%s error=%s",
+                getattr(msg, "chat_id", None),
+                getattr(msg, "id", None),
+                getattr(reply_to, "reply_to_msg_id", None),
+                e,
+            )
+            return False
+
+        if reply_msg is None:
+            return False
+
+        self_id = self._normalize_entity_id(getattr(self.adapter, "self_id", None))
+        if self_id is None:
+            return False
+
+        reply_sender_id = self._normalize_entity_id(getattr(reply_msg, "sender_id", None))
+        if reply_sender_id == self_id:
+            return True
+
+        try:
+            reply_sender = await reply_msg.get_sender()
+        except Exception:
+            reply_sender = None
+        else:
+            reply_sender_id = self._normalize_entity_id(getattr(reply_sender, "id", None))
+            if reply_sender_id == self_id:
+                return True
+
+        return False
+
     async def convert_message(
         self,
         event: Any,
         include_reply: bool = True,
     ) -> AstrBotMessage:
-        is_private = bool(getattr(event, "is_private", False))
         message = getattr(event, "message", None)
+        is_private = self.resolve_is_private(message, getattr(event, "is_private", False))
         peer = getattr(message, "peer_id", None)
-        if not is_private:
-            if type(peer).__name__ == "PeerUser":
-                is_private = True
         if getattr(self.adapter, "debug_logging", False):
             logger.info(
                 "[Telethon][Debug] convert_message: chat_id=%s sender_id=%s peer_type=%s "
@@ -51,6 +97,10 @@ class TelethonMessageConverter:
             )
         chat_id = str(event.chat_id)
         thread_id = None if is_private else self.extract_thread_id(message)
+        reply_to_self_triggers_command = await self.should_treat_reply_to_self_as_command(
+            event.message,
+            is_private=is_private,
+        )
         return await self.convert_telethon_message(
             msg=event.message,
             sender=await event.get_sender(),
@@ -59,6 +109,7 @@ class TelethonMessageConverter:
             is_private=is_private,
             include_reply=include_reply,
             strip_trigger_prefix=True,
+            reply_to_self_triggers_command=reply_to_self_triggers_command,
         )
 
     async def convert_telethon_message(
@@ -70,6 +121,7 @@ class TelethonMessageConverter:
         is_private: bool,
         include_reply: bool,
         strip_trigger_prefix: bool,
+        reply_to_self_triggers_command: bool = False,
     ) -> AstrBotMessage:
         sender_name = (
             getattr(sender, "username", None)
@@ -107,7 +159,7 @@ class TelethonMessageConverter:
                 getattr(msg, "entities", None),
             )
 
-        inject_self_at = False
+        inject_self_at = reply_to_self_triggers_command and not is_private
         if (
             strip_trigger_prefix
             and self.adapter.trigger_prefix
@@ -163,6 +215,7 @@ class TelethonMessageConverter:
                             is_private=reply_is_private,
                             include_reply=False,
                             strip_trigger_prefix=False,
+                            reply_to_self_triggers_command=False,
                         )
                     except Exception:
                         logger.exception(
@@ -243,6 +296,18 @@ class TelethonMessageConverter:
         if not normalized:
             return None
         return normalized
+
+    @classmethod
+    def _normalize_entity_id(cls, value: Any) -> str | None:
+        return cls._normalize_thread_id(value)
+
+    @staticmethod
+    def resolve_is_private(msg: Any, event_is_private: Any = False) -> bool:
+        is_private = bool(event_is_private)
+        if is_private:
+            return True
+        peer = getattr(msg, "peer_id", None)
+        return type(peer).__name__ == "PeerUser"
 
     @classmethod
     def extract_thread_id(cls, msg: Any) -> str | None:

@@ -76,6 +76,7 @@ python3 ./astrbot_plugin_telethon_adapter/scripts/generate_session.py
 - `session_string`: 上一步得到的 StringSession
 - `language`: 适配器实例语言，支持 `zh-CN` 与 `en-US`，默认 `zh-CN`
 - `trigger_prefix`: 触发前缀，默认是 `-astr`。此为消息入口过滤前缀，用于减少无关消息日志和后续 AstrBot 管线调用；在本插件场景下可替代唤醒词使用。
+- `reply_to_self_triggers_command`: 是否允许“回复自己”的消息触发命令，默认 `false`。仅群聊生效；开启后，回复当前 Telethon 账号发出的消息，也会视为一次唤醒继续处理。
 - `download_incoming_media`: 是否下载收到的媒体文件（建议 `true`）
 - `telethon_media_group_timeout`: 媒体组聚合防抖延迟（秒，默认 `1.2`）
 - `telethon_media_group_max_wait`: 媒体组最大等待时间（秒，默认 `8.0`）

@@ -198,6 +198,7 @@ class _FakeAdapter:
         self.self_id = "999"
         self.self_username = "astrbot"
         self.trigger_prefix = "-astr"
+        self.reply_to_self_triggers_command = False
         self.debug_logging = False
         self.download_incoming_media = download_incoming_media
         self._temp_dir = temp_dir
@@ -294,9 +295,11 @@ class _FakeReplyMessage(_FakeMessage):
             document=document,
         )
         self._sender = sender
+        self.sender_id = getattr(sender, "id", None)
         self.chat_id = chat_id
         self.is_private = is_private
         self.date = date or datetime.fromtimestamp(1700000000)
+        self.out = str(self.sender_id) == "999"
 
     async def get_sender(self):
         return self._sender
@@ -616,6 +619,135 @@ class MessageConverterTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.message[1].qq, "astrbot")
         self.assertEqual(type(result.message[2]).__name__, "Plain")
         self.assertEqual(result.message[2].text, "ack")
+
+    async def test_convert_group_reply_to_self_injects_wakeup_at_when_enabled(self):
+        module = _load_message_converter_module()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            adapter = _FakeAdapter(temp_dir)
+            adapter.reply_to_self_triggers_command = True
+            converter = module.TelethonMessageConverter(adapter)
+            reply_message = _FakeReplyMessage(
+                98,
+                sender=_FakeSender(999, username="astrbot"),
+                raw_text="previous bot output",
+                chat_id="100",
+            )
+            message = _FakeMessage(
+                8,
+                raw_text="tg status",
+                reply_message=reply_message,
+            )
+            message.reply_to = types.SimpleNamespace(reply_to_msg_id=98)
+            event = _FakeEvent(
+                message,
+                _FakeSender(123, username="alice"),
+            )
+
+            result = await converter.convert_message(event)
+
+        self.assertEqual(type(result.message[0]).__name__, "Reply")
+        self.assertEqual(type(result.message[1]).__name__, "At")
+        self.assertEqual(result.message[1].qq, "astrbot")
+        self.assertEqual(type(result.message[2]).__name__, "Plain")
+        self.assertEqual(result.message[2].text, "tg status")
+
+    async def test_convert_private_reply_to_self_does_not_inject_wakeup_at(self):
+        module = _load_message_converter_module()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            adapter = _FakeAdapter(temp_dir)
+            adapter.reply_to_self_triggers_command = True
+            converter = module.TelethonMessageConverter(adapter)
+            reply_message = _FakeReplyMessage(
+                97,
+                sender=_FakeSender(999, username="astrbot"),
+                raw_text="previous bot output",
+                chat_id="42",
+                is_private=True,
+            )
+            message = _FakeMessage(
+                9,
+                raw_text="tg status",
+                reply_message=reply_message,
+            )
+            message.reply_to = types.SimpleNamespace(reply_to_msg_id=97)
+            event = _FakeEvent(
+                message,
+                _FakeSender(123, username="alice"),
+                chat_id="42",
+                is_private=True,
+            )
+
+            result = await converter.convert_message(event)
+
+        self.assertEqual([type(component).__name__ for component in result.message], ["Reply", "Plain"])
+        self.assertEqual(result.message[1].text, "tg status")
+
+    async def test_convert_reply_to_outgoing_non_self_sender_does_not_inject_wakeup_at(self):
+        module = _load_message_converter_module()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            adapter = _FakeAdapter(temp_dir)
+            adapter.reply_to_self_triggers_command = True
+            converter = module.TelethonMessageConverter(adapter)
+            reply_sender = _FakeSender(555, username="channel_alias")
+            reply_message = _FakeReplyMessage(
+                96,
+                sender=reply_sender,
+                raw_text="send-as output",
+                chat_id="100",
+            )
+            reply_message.out = True
+            message = _FakeMessage(
+                10,
+                raw_text="tg status",
+                reply_message=reply_message,
+            )
+            message.reply_to = types.SimpleNamespace(reply_to_msg_id=96)
+            event = _FakeEvent(
+                message,
+                _FakeSender(123, username="alice"),
+            )
+
+            result = await converter.convert_message(event)
+
+        self.assertEqual([type(component).__name__ for component in result.message], ["Reply", "Plain"])
+        self.assertEqual(result.message[1].text, "tg status")
+
+    async def test_convert_topic_root_reply_to_self_does_not_inject_wakeup_at(self):
+        module = _load_message_converter_module()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            adapter = _FakeAdapter(temp_dir)
+            adapter.reply_to_self_triggers_command = True
+            converter = module.TelethonMessageConverter(adapter)
+            reply_message = _FakeReplyMessage(
+                777,
+                sender=_FakeSender(999, username="astrbot"),
+                raw_text="topic root",
+                chat_id="-100222",
+            )
+            message = _FakeMessage(
+                11,
+                raw_text="tg status",
+                reply_message=reply_message,
+            )
+            message.reply_to = types.SimpleNamespace(
+                reply_to_msg_id=777,
+                top_msg_id=777,
+            )
+            event = _FakeEvent(
+                message,
+                _FakeSender(123, username="alice"),
+                chat_id="-100222",
+            )
+
+            result = await converter.convert_message(event)
+
+        self.assertEqual(result.group_id, "-100222#777")
+        self.assertEqual([type(component).__name__ for component in result.message], ["Plain"])
+        self.assertEqual(result.message[0].text, "tg status")
 
     async def test_convert_group_topic_message_uses_thread_scoped_session(self):
         module = _load_message_converter_module()

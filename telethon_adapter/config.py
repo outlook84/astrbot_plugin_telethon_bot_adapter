@@ -14,6 +14,7 @@ FIELD_SPECS = {
         "options": ["zh-CN", "en-US"],
     },
     "trigger_prefix": {"type": "string"},
+    "reply_to_self_triggers_command": {"type": "bool"},
     "download_incoming_media": {"type": "bool"},
     "incoming_media_ttl_seconds": {"type": "float"},
     "log_processed_messages_only": {"type": "bool"},
@@ -65,6 +66,7 @@ DEFAULT_CONFIG_TEMPLATE = {
     "session_string": "",
     "language": DEFAULT_LANGUAGE,
     "trigger_prefix": "-astr",
+    "reply_to_self_triggers_command": False,
     "download_incoming_media": True,
     "incoming_media_ttl_seconds": 600.0,
     "log_processed_messages_only": True,
@@ -156,6 +158,9 @@ def apply_config(adapter: Any) -> None:
     adapter.session_string = parse_str(adapter.config.get("session_string"), "")
     adapter.language = parse_str(adapter.config.get("language"), DEFAULT_LANGUAGE)
     adapter.trigger_prefix = parse_str(adapter.config.get("trigger_prefix"), "")
+    adapter.reply_to_self_triggers_command = parse_bool(
+        adapter.config.get("reply_to_self_triggers_command"), False
+    )
     adapter.download_incoming_media = parse_bool(
         adapter.config.get("download_incoming_media"), True
     )

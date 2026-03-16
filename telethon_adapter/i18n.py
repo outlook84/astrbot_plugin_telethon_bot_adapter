@@ -32,6 +32,10 @@ CONFIG_FIELD_TEXTS = {
             "description": "触发前缀",
             "hint": "仅处理以此前缀开头的消息。留空表示处理所有消息。",
         },
+        "reply_to_self_triggers_command": {
+            "description": "回复自己触发命令",
+            "hint": "仅群聊生效。开启后，回复当前 Telethon 账号发出的消息时，也视为一次唤醒。默认关闭。",
+        },
         "download_incoming_media": {
             "description": "下载入站媒体",
             "hint": "关闭后，不下载收到的图片、文件、音视频附件。",
@@ -111,6 +115,10 @@ CONFIG_FIELD_TEXTS = {
         "trigger_prefix": {
             "description": "Trigger Prefix",
             "hint": "Only process messages starting with this prefix. Leave empty to process all messages.",
+        },
+        "reply_to_self_triggers_command": {
+            "description": "Reply To Self Triggers Command",
+            "hint": "Group chats only. When enabled, replying to a message sent by the current Telethon account is also treated as a wake-up trigger. Disabled by default.",
         },
         "download_incoming_media": {
             "description": "Download Incoming Media",

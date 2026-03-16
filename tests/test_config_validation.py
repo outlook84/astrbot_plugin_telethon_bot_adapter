@@ -227,9 +227,23 @@ def _install_local_module_stubs() -> None:
             return f"{chat_id}#{thread_id}"
 
         @staticmethod
+        def resolve_is_private(message, event_is_private=False):
+            if event_is_private:
+                return True
+            peer = getattr(message, "peer_id", None)
+            return type(peer).__name__ == "PeerUser"
+
+        @staticmethod
         def is_topic_service_message(message):
             action = getattr(message, "action", None)
             return type(action).__name__.startswith("MessageActionTopic") if action is not None else False
+
+        async def should_treat_reply_to_self_as_command(self, message, *, is_private):
+            return bool(
+                getattr(self.adapter, "reply_to_self_triggers_command", False)
+                and getattr(message, "reply_to_self_trigger", False)
+                and not is_private
+            )
 
     telethon_event_module.TelethonEvent = type("TelethonEvent", (), {})
     message_converter_module.TelethonMessageConverter = TelethonMessageConverter
@@ -328,6 +342,21 @@ class ConfigValidationTests(unittest.TestCase):
         )
 
         self.assertTrue(adapter.debug_logging)
+
+    def test_init_parses_reply_to_self_triggers_command_flag(self):
+        module = _load_adapter_module()
+        adapter = module.TelethonPlatformAdapter(
+            {
+                "api_id": 123,
+                "api_hash": "hash",
+                "session_string": "session",
+                "reply_to_self_triggers_command": "true",
+            },
+            {},
+            asyncio.Queue(),
+        )
+
+        self.assertTrue(adapter.reply_to_self_triggers_command)
 
     def test_validate_config_reports_invalid_required_field(self):
         module = _load_adapter_module()
@@ -629,6 +658,58 @@ class AdapterBehaviorTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(converted, [])
         self.assertEqual(committed, [])
+
+    async def test_on_new_message_allows_reply_to_self_trigger_without_prefix(self):
+        module = _load_adapter_module()
+        adapter = module.TelethonPlatformAdapter(
+            {
+                "api_id": 123,
+                "api_hash": "hash",
+                "session_string": "session",
+                "trigger_prefix": "-astr",
+                "reply_to_self_triggers_command": True,
+            },
+            {},
+            asyncio.Queue(),
+        )
+        adapter._running = True
+        converted = []
+        committed = []
+
+        async def fake_convert_message(event, include_reply=True):
+            converted.append((event.message.id, include_reply))
+            return types.SimpleNamespace(
+                message_id=str(event.message.id),
+                message_str=event.message.raw_text,
+                message=[],
+                sender=types.SimpleNamespace(user_id="123", nickname="alice"),
+                session_id=str(event.chat_id),
+                type="group",
+            )
+
+        class _Event:
+            def __init__(self):
+                self.chat_id = "100"
+                self.sender_id = "123"
+                self.is_private = False
+                self.message = types.SimpleNamespace(
+                    id=16,
+                    raw_text="tg status",
+                    grouped_id=None,
+                    out=False,
+                    reply_to_self_trigger=True,
+                )
+
+            async def get_sender(self):
+                return types.SimpleNamespace(id=123, bot=False)
+
+        adapter._convert_message = fake_convert_message
+        adapter._commit_abm = committed.append
+
+        await adapter._on_new_message(_Event())
+
+        self.assertEqual(converted, [(16, True)])
+        self.assertEqual(len(committed), 1)
 
     async def test_grouped_message_session_id_includes_topic_thread(self):
         module = _load_adapter_module()

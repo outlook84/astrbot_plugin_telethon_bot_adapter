@@ -78,6 +78,7 @@ Add a new platform adapter in AstrBot and choose `telethon_userbot`, then fill i
 - `session_string`: the generated StringSession
 - `language`: adapter instance language, supports `zh-CN` and `en-US`, default `zh-CN`
 - `trigger_prefix`: trigger prefix, default `-astr`. This acts as the message entry filter prefix to reduce unrelated logs and downstream AstrBot pipeline calls; in this plugin it can replace a wake word
+- `reply_to_self_triggers_command`: whether replying to your own message should trigger command handling, default `false`. Group chats only; when enabled, replying to a message sent by the current Telethon account is also treated as a wake-up trigger
 - `download_incoming_media`: whether to download received media, recommended `true`
 - `telethon_media_group_timeout`: debounce delay for media group aggregation in seconds, default `1.2`
 - `telethon_media_group_max_wait`: maximum wait time for media group aggregation in seconds, default `8.0`
