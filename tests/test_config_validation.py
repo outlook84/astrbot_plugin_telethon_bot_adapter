@@ -293,6 +293,28 @@ class ConfigValidationTests(unittest.TestCase):
         self.assertEqual(adapter.meta().name, "telethon_bot")
         self.assertEqual(adapter.meta().id, "telethon_bot")
 
+    def test_build_adapter_capability_uses_default_limit_for_bot(self):
+        _, adapter_module = _load_modules()
+        adapter = adapter_module.TelethonPlatformAdapter(
+            {
+                "api_id": 123,
+                "api_hash": "hash",
+                "bot_token": "123:abc",
+            },
+            {},
+            asyncio.Queue(),
+        )
+
+        capability = adapter._build_adapter_capability()
+
+        self.assertFalse(capability["supports_spoiler"])
+        self.assertEqual(capability["max_items"], 10)
+        self.assertEqual(capability["supported_types"], ["image", "video"])
+        self.assertEqual(
+            capability["upload_constraints"]["max_single_file_bytes"],
+            adapter_module.TELEGRAM_MAX_FILE_BYTES_DEFAULT,
+        )
+
     def test_validate_config_requires_bot_token(self):
         config_module, _ = _load_modules()
         adapter = types.SimpleNamespace(

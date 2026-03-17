@@ -62,6 +62,7 @@ TELETHON_RETRY_DELAY_SECONDS = 1
 OUTER_RECONNECT_BASE_DELAY_SECONDS = 1.0
 OUTER_RECONNECT_MAX_DELAY_SECONDS = 30.0
 OUTER_RECONNECT_RESET_AFTER_SECONDS = 300.0
+TELEGRAM_MAX_FILE_BYTES_DEFAULT = 2_097_152_000
 
 
 @register_platform_adapter(
@@ -233,6 +234,7 @@ class TelethonPlatformAdapter(Platform):
             session_id=session.session_id,
             client=self.client,
         )
+        message_event.adapter_capability = self._build_adapter_capability()
         message_event.telethon_language = self.language
         await message_event.send(message_chain)
         await super().send_by_session(session, message_chain)
@@ -861,9 +863,24 @@ class TelethonPlatformAdapter(Platform):
             session_id=abm.session_id,
             client=self.client,
         )
+        message_event.adapter_capability = self._build_adapter_capability()
         message_event.telethon_debug_logging = self.debug_logging
         message_event.telethon_language = self.language
         self.commit_event(message_event)
+
+    @staticmethod
+    def _build_adapter_capability() -> dict[str, Any]:
+        return {
+            "supports_media_group": True,
+            "supports_spoiler": False,
+            "max_items": 10,
+            "supported_types": ["image", "video"],
+            "supports_mixed_types": True,
+            "upload_constraints": {
+                "max_single_file_bytes": TELEGRAM_MAX_FILE_BYTES_DEFAULT,
+                "max_total_group_bytes": None,
+            },
+        }
 
     async def _handle_grouped_message(
         self,
