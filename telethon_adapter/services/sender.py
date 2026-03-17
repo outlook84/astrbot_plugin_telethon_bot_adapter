@@ -115,7 +115,7 @@ class TelethonSender:
         reply_to: Any | None,
         link_preview: bool,
     ) -> Any:
-        if not isinstance(reply_to, types.InputReplyToMessage):
+        if not self._should_use_low_level_request(reply_to):
             return await client.send_message(
                 peer,
                 text,
@@ -144,7 +144,7 @@ class TelethonSender:
         *,
         reply_to: Any | None,
     ) -> Any:
-        if not isinstance(reply_to, types.InputReplyToMessage):
+        if not self._should_use_low_level_request(reply_to):
             return await client.send_file(
                 peer,
                 file=file_path,
@@ -171,6 +171,10 @@ class TelethonSender:
             entities=msg_entities,
         )
         return await self._execute_request(client, request, entity)
+
+    @staticmethod
+    def _should_use_low_level_request(reply_to: Any | None) -> bool:
+        return isinstance(reply_to, types.InputReplyToMessage)
 
     def schedule_delete_message(
         self,
