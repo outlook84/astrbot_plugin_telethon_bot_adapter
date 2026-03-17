@@ -16,6 +16,19 @@ English README: [README_EN.md](README_EN.md)
 - 该插件平台类型是 `telethon_bot`。
 - 适配器不支持平台级流式展示。如果 AstrBot 开启了 `provider_settingsstreaming_response`，请将“不支持流式回复的平台”设置为“关闭流式回复”。
 
+## 安装
+
+将插件目录放置到 `AstrBot` 的 `data/plugins/` 目录下：
+
+```
+data/plugins/astrbot_plugin_telethon_bot_adapter/
+```
+安装插件后，AstrBot 会自动根据 `requirements.txt` 为插件安装依赖库。
+
+依赖里包含 `cryptg`，用于提升 Telethon 的加解密性能。
+- 常见 glibc 发行版通常可以直接安装预编译 wheel。
+- Alpine Linux 以及其它使用 musl 库的发行版，需要本地编译 `cryptg` 的编译环境，至少需要 `python3-dev`、`musl-dev`、`gcc`、`linux-headers`、`rust`、`cargo`。
+
 ## 配置
 
 先在 [my.telegram.org](https://my.telegram.org) 申请 `api_id` 和 `api_hash`。如果无法申请到，更换代理出口 IP 地址。

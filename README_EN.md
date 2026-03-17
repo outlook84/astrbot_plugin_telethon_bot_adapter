@@ -14,6 +14,21 @@ A Telegram Bot adapter for AstrBot built on top of Telethon.
 - The adapter reports platform type `telethon_bot`.
 - Platform-level streaming display is unsupported. If AstrBot has `provider_settings.streaming_response` enabled, please disable it for this adapter.
 
+## Installation
+
+Place the plugin directory under `AstrBot`'s `data/plugins/` directory:
+
+```text
+data/plugins/astrbot_plugin_telethon_adapter/
+```
+
+After installation, AstrBot will install dependencies from `requirements.txt` automatically.
+
+The dependency list includes `cryptg` to improve Telethon cryptography performance.
+
+- On common glibc-based distributions, the prebuilt wheel usually installs directly.
+- On Alpine Linux and other musl-based distributions, local build tooling is required, including at least `python3-dev`, `musl-dev`, `gcc`, `linux-headers`, `rust`, and `cargo`.
+
 ## Configuration
 
 First, apply for `api_id` and `api_hash` at [my.telegram.org](https://my.telegram.org). If you cannot apply for them, change the egress IP address.
