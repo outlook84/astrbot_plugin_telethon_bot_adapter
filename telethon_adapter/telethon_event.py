@@ -454,7 +454,7 @@ class TelethonEvent(AstrMessageEvent):
         reply_to: int | None = None
         caption_parts: list[str] = []
         media_items: list[tuple[str, bool, bool]] = []
-        media_kind: str | None = None
+        action_name = "photo"
         has_spoiler = False
 
         for item in message.chain:
@@ -474,20 +474,13 @@ class TelethonEvent(AstrMessageEvent):
                     return False
                 item_spoiler = self._component_has_spoiler(item)
                 has_spoiler = has_spoiler or item_spoiler
-                if media_kind is None:
-                    media_kind = "image"
-                elif media_kind != "image":
-                    return False
                 media_items.append((file_path, item_spoiler, False))
                 continue
             if isinstance(item, Video):
                 file_path = await item.convert_to_file_path()
                 item_spoiler = self._component_has_spoiler(item)
                 has_spoiler = has_spoiler or item_spoiler
-                if media_kind is None:
-                    media_kind = "video"
-                elif media_kind != "video":
-                    return False
+                action_name = "video"
                 media_items.append((file_path, item_spoiler, True))
                 continue
             return False
@@ -496,9 +489,8 @@ class TelethonEvent(AstrMessageEvent):
             return False
 
         caption = "".join(caption_parts).strip() or None
-        action_name = "photo" if media_kind == "image" else "video"
         fallback_action: types.TypeSendMessageAction
-        if media_kind == "image":
+        if action_name == "photo":
             fallback_action = types.SendMessageUploadPhotoAction(progress=0)
         else:
             fallback_action = types.SendMessageUploadVideoAction(progress=0)
@@ -625,7 +617,6 @@ class TelethonEvent(AstrMessageEvent):
                     reply_to,
                     "audio",
                     types.SendMessageUploadAudioAction(progress=0),
-                    spoiler=self._component_has_spoiler(item),
                 )
                 continue
 
@@ -637,7 +628,6 @@ class TelethonEvent(AstrMessageEvent):
                     reply_to,
                     "document",
                     types.SendMessageUploadDocumentAction(progress=0),
-                    spoiler=self._component_has_spoiler(item),
                 )
                 continue
 
