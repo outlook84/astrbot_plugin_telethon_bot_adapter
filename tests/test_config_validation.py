@@ -474,3 +474,59 @@ class ConfigValidationTests(unittest.TestCase):
             await adapter._sync_bot_commands()
 
         asyncio.run(_run())
+
+    def test_apply_menu_button_logs_only_on_mode_change(self):
+        _, adapter_module = _load_modules()
+
+        class _CapturingLogger:
+            def __init__(self):
+                self.info_calls = []
+                self.error_calls = []
+
+            def info(self, *args, **kwargs):
+                self.info_calls.append((args, kwargs))
+
+            def warning(self, *args, **kwargs):
+                return None
+
+            def error(self, *args, **kwargs):
+                self.error_calls.append((args, kwargs))
+
+            def debug(self, *args, **kwargs):
+                return None
+
+            def exception(self, *args, **kwargs):
+                return None
+
+        class _CapturingClient:
+            def __init__(self):
+                self.requests = []
+
+            async def __call__(self, request):
+                self.requests.append(request)
+                return request
+
+        adapter = adapter_module.TelethonPlatformAdapter(
+            {"api_id": 123, "api_hash": "hash", "bot_token": "123:abc"},
+            {},
+            asyncio.Queue(),
+        )
+        adapter.client = _CapturingClient()
+        adapter.menu_button_mode = "commands"
+
+        original_logger = adapter_module.logger
+        capturing_logger = _CapturingLogger()
+        adapter_module.logger = capturing_logger
+
+        async def _run():
+            await adapter._apply_menu_button()
+            await adapter._apply_menu_button()
+
+        try:
+            asyncio.run(_run())
+        finally:
+            adapter_module.logger = original_logger
+
+        self.assertEqual(len(adapter.client.requests), 2)
+        self.assertEqual(len(capturing_logger.info_calls), 1)
+        self.assertEqual(capturing_logger.error_calls, [])

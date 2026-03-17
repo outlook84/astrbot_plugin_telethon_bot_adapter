@@ -105,6 +105,7 @@ class TelethonPlatformAdapter(Platform):
         self._media_temp_dir = self._build_media_temp_dir()
         self._message_converter = TelethonMessageConverter(self)
         self._last_command_signature: tuple[tuple[str, str], ...] | None = None
+        self._last_applied_menu_button_mode: str | None = None
 
     def meta(self) -> PlatformMetadata:
         adapter_id = str(self.config.get("id") or "telethon_bot")
@@ -368,10 +369,12 @@ class TelethonPlatformAdapter(Platform):
                     button=button,
                 )
             )
-            logger.info(
-                "[Telethon] Applied menu button mode: %s",
-                self.menu_button_mode,
-            )
+            if self._last_applied_menu_button_mode != self.menu_button_mode:
+                logger.info(
+                    "[Telethon] Applied menu button mode: %s",
+                    self.menu_button_mode,
+                )
+            self._last_applied_menu_button_mode = self.menu_button_mode
         except Exception as exc:
             logger.error(
                 "[Telethon] Failed to apply menu button mode %s: %s",
@@ -433,6 +436,8 @@ class TelethonPlatformAdapter(Platform):
                     "[Telethon] Failed to reset menu button during shutdown: %s",
                     exc,
                 )
+            finally:
+                self._last_applied_menu_button_mode = None
 
     def _collect_commands(self) -> list[types.BotCommand]:
         if CommandFilter is None or CommandGroupFilter is None:
@@ -535,6 +540,7 @@ class TelethonPlatformAdapter(Platform):
         task = self._main_task
         self.client = None
         self._main_task = None
+        self._last_applied_menu_button_mode = None
         profile_sync_task = self._profile_sync_task
         self._profile_sync_task = None
 
