@@ -28,12 +28,7 @@ import pathlib
 import re
 from typing import Any
 
-try:
-    from astrbot.api import logger
-except Exception:
-    import logging
-
-    logger = logging.getLogger(__name__)
+from astrbot.api import logger
 
 
 def _debug_logging_enabled(client: Any) -> bool:

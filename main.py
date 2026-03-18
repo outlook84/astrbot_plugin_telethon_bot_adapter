@@ -1,3 +1,5 @@
+from typing import Awaitable, Callable, TypeVar
+
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, register
@@ -15,6 +17,8 @@ from .telethon_adapter.services import (
     TelethonStatusService,
 )
 from . import telethon_adapter  # noqa: F401  # import for platform adapter registration
+
+T = TypeVar("T")
 
 
 @register(PLUGIN_NAME, PLUGIN_AUTHOR, PLUGIN_DESC, PLUGIN_VERSION, PLUGIN_REPO)
@@ -78,8 +82,8 @@ class TelethonAdapterPlugin(Star):
         *,
         log_name: str,
         failure_key: str,
-        execute: callable,
-        send_result: callable,
+        execute: Callable[[], Awaitable[T]],
+        send_result: Callable[[T], Awaitable[object]],
     ) -> None:
         self._log_command_debug(event, log_name)
 
