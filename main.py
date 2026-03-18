@@ -14,7 +14,7 @@ from .telethon_adapter.services import (
     TelethonSender,
     TelethonStatusService,
 )
-from .telethon_adapter import TelethonPlatformAdapter  # noqa: F401
+from . import telethon_adapter  # noqa: F401  # import for platform adapter registration
 
 
 @register(PLUGIN_NAME, PLUGIN_AUTHOR, PLUGIN_DESC, PLUGIN_VERSION, PLUGIN_REPO)
