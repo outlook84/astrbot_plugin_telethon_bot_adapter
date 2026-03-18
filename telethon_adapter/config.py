@@ -182,7 +182,7 @@ def apply_config(adapter: Any) -> None:
     adapter.api_id = parse_int(adapter.config.get("api_id"), 0)
     adapter.api_hash = parse_str(adapter.config.get("api_hash"), "")
     adapter.bot_token = parse_str(adapter.config.get("bot_token"), "")
-    adapter.language = parse_str(adapter.config.get("language"), DEFAULT_LANGUAGE)
+    adapter.language = normalize_language(adapter.config.get("language"))
     adapter.reply_to_self_triggers_command = parse_bool(
         adapter.config.get("reply_to_self_triggers_command"), False
     )
