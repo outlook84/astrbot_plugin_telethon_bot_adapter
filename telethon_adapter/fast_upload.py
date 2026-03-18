@@ -46,7 +46,7 @@ try:
         ImportAuthorizationRequest,
     )
     from telethon.tl.functions.upload import SaveBigFilePartRequest, SaveFilePartRequest
-except Exception as exc:
+except (ImportError, AttributeError) as exc:
     helpers = None
     utils = None
     _resize_photo_if_needed = None
@@ -65,11 +65,18 @@ else:
 
 def should_use_fast_upload(client: Any, file: Any) -> bool:
     if _FAST_UPLOAD_IMPORT_ERROR is not None:
+        if _debug_logging_enabled(client):
+            logger.info(
+                "[Telethon][Debug] fast_upload_unavailable: import_error=%r",
+                _FAST_UPLOAD_IMPORT_ERROR,
+            )
         return False
     if isinstance(file, pathlib.Path):
         file = str(file.absolute())
     if not isinstance(file, str) or not os.path.isfile(file):
         return False
+    # Fast upload depends on Telethon private client internals and must fail closed
+    # when the runtime client does not expose the expected low-level hooks.
     required_attrs = (
         "_call",
         "_get_dc",
@@ -77,7 +84,13 @@ def should_use_fast_upload(client: Any, file: Any) -> bool:
         "_log",
         "session",
     )
-    if any(not hasattr(client, attr) for attr in required_attrs):
+    missing_attrs = [attr for attr in required_attrs if not hasattr(client, attr)]
+    if missing_attrs:
+        if _debug_logging_enabled(client):
+            logger.info(
+                "[Telethon][Debug] fast_upload_unavailable: missing_client_attrs=%s",
+                missing_attrs,
+            )
         return False
     session = getattr(client, "session", None)
     enabled = bool(
@@ -85,6 +98,11 @@ def should_use_fast_upload(client: Any, file: Any) -> bool:
         and hasattr(session, "dc_id")
         and hasattr(session, "auth_key")
     )
+    if not enabled and _debug_logging_enabled(client):
+        logger.info(
+            "[Telethon][Debug] fast_upload_unavailable: invalid_session=%r",
+            session,
+        )
     if enabled and _debug_logging_enabled(client):
         logger.info(
             "[Telethon][Debug] fast_upload_available: path=%s",
