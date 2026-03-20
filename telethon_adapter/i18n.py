@@ -40,10 +40,6 @@ CONFIG_FIELD_TEXTS = {
             "description": "入站媒体缓存 TTL",
             "hint": "媒体下载到本地后保留的秒数。设为 0 或负数表示仅在适配器退出时清理。",
         },
-        "debug_logging": {
-            "description": "调试日志",
-            "hint": "开启后，输出更详细的 Telethon 事件转换、原始事件与命令调试日志。",
-        },
         "fast_upload_enabled": {
             "description": "启用 Fast Upload 并行上传",
             "hint": "默认关闭。开启后，本地文件会优先尝试走 Telethon fast upload 并行上传链路；关闭后始终回退到 Telethon 默认上传。",
@@ -136,10 +132,6 @@ CONFIG_FIELD_TEXTS = {
         "incoming_media_ttl_seconds": {
             "description": "Incoming Media Cache TTL",
             "hint": "How long downloaded media is kept locally in seconds. Set to 0 or negative to clean up only when the adapter exits.",
-        },
-        "debug_logging": {
-            "description": "Debug Logging",
-            "hint": "When enabled, output more detailed Telethon event conversion, raw event, and command debug logs.",
         },
         "fast_upload_enabled": {
             "description": "Enable Fast Upload Parallel Upload",

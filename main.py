@@ -31,18 +31,15 @@ class TelethonAdapterPlugin(Star):
         self._sender = TelethonSender()
 
     def _log_command_debug(self, event: AstrMessageEvent, command: str, **kwargs: str) -> None:
-        if not bool(getattr(event, "telethon_debug_logging", False)):
-            return
-
         extra = " ".join(f"{key}=%r" for key in kwargs)
         suffix = f" {extra}" if extra else ""
-        logger.info(
-            f"[Telethon][Debug] {command}: session_id=%s sender_id=%s "
-            f"platform_id=%s message_str=%r{suffix}",
+        logger.debug(
+            f"[Telethon] command_received: command=%s session_id=%s sender_id=%s "
+            f"platform_id=%s{suffix}",
+            command,
             getattr(event, "session_id", None),
             getattr(event, "get_sender_id", lambda: "")(),
             getattr(getattr(event, "platform_meta", None), "id", None),
-            getattr(event, "message_str", ""),
             *kwargs.values(),
         )
 
