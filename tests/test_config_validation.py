@@ -274,8 +274,8 @@ class ConfigValidationTests(unittest.TestCase):
                 "api_hash": "hash",
                 "bot_token": "123:abc",
                 "reply_to_self_triggers_command": "true",
-                "debug_logging": "true",
                 "fast_upload_enabled": "false",
+                "raw_event_debug": "true",
                 "telethon_command_register": "false",
                 "telethon_command_auto_refresh": "false",
                 "telethon_command_register_interval": "123",
@@ -287,8 +287,8 @@ class ConfigValidationTests(unittest.TestCase):
 
         self.assertEqual(adapter.bot_token, "123:abc")
         self.assertTrue(adapter.reply_to_self_triggers_command)
-        self.assertTrue(adapter.debug_logging)
         self.assertFalse(adapter.fast_upload_enabled)
+        self.assertTrue(adapter.raw_event_debug)
         self.assertFalse(adapter.sync_bot_commands)
         self.assertFalse(adapter.command_auto_refresh)
         self.assertEqual(adapter.command_refresh_interval, 123)
