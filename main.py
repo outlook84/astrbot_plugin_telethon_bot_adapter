@@ -16,7 +16,6 @@ from .telethon_adapter.services import (
     TelethonSender,
     TelethonStatusService,
 )
-from . import telethon_adapter  # noqa: F401  # import for platform adapter registration
 
 T = TypeVar("T")
 
@@ -25,6 +24,8 @@ T = TypeVar("T")
 class TelethonAdapterPlugin(Star):
     def __init__(self, context: Context):
         super().__init__(context)
+        from .telethon_adapter import TelethonPlatformAdapter  # noqa: F401
+
         self.context = context
         self._status_service = TelethonStatusService(context)
         self._sender = TelethonSender()
