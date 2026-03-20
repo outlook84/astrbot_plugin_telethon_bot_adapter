@@ -44,6 +44,10 @@ CONFIG_FIELD_TEXTS = {
             "description": "调试日志",
             "hint": "开启后，输出更详细的 Telethon 事件转换、原始事件与命令调试日志。",
         },
+        "fast_upload_enabled": {
+            "description": "启用 Fast Upload 并行上传",
+            "hint": "默认关闭。开启后，本地文件会优先尝试走 Telethon fast upload 并行上传链路；关闭后始终回退到 Telethon 默认上传。",
+        },
         "telethon_command_register": {
             "description": "同步 Bot Commands",
             "hint": "连接成功后，自动把 AstrBot 已注册命令同步到 Telegram bot commands。",
@@ -136,6 +140,10 @@ CONFIG_FIELD_TEXTS = {
         "debug_logging": {
             "description": "Debug Logging",
             "hint": "When enabled, output more detailed Telethon event conversion, raw event, and command debug logs.",
+        },
+        "fast_upload_enabled": {
+            "description": "Enable Fast Upload Parallel Upload",
+            "hint": "Disabled by default. When enabled, local files will prefer the Telethon fast upload parallel upload path; when disabled, uploads always fall back to Telethon's default uploader.",
         },
         "telethon_command_register": {
             "description": "Sync Bot Commands",

@@ -245,6 +245,7 @@ class TelethonPlatformAdapter(Platform):
     async def _run_client_once(self, client_kwargs: dict[str, Any]) -> None:
         self.client = self._create_client(client_kwargs)
         setattr(self.client, "telethon_debug_logging", bool(self.debug_logging))
+        setattr(self.client, "telethon_fast_upload_enabled", bool(self.fast_upload_enabled))
         await self.client.start(bot_token=self.bot_token)
         if not await self.client.is_user_authorized():
             raise RuntimeError(
@@ -261,7 +262,7 @@ class TelethonPlatformAdapter(Platform):
             "[Telethon] Bot started: %s username=%s "
             "download_incoming_media=%s incoming_media_ttl_seconds=%s "
             "reply_to_self_triggers_command=%s debug_logging=%s proxy_type=%s "
-            "proxy_host=%s proxy_port=%s raw_config=%s",
+            "proxy_host=%s proxy_port=%s fast_upload_enabled=%s raw_config=%s",
             self.self_id,
             self.self_username,
             self.download_incoming_media,
@@ -271,6 +272,7 @@ class TelethonPlatformAdapter(Platform):
             self.proxy_type or "direct",
             self.proxy_host or "",
             self.proxy_port or 0,
+            self.fast_upload_enabled,
             {
                 "reply_to_self_triggers_command": self.config.get(
                     "reply_to_self_triggers_command"
@@ -280,6 +282,7 @@ class TelethonPlatformAdapter(Platform):
                     "incoming_media_ttl_seconds"
                 ),
                 "debug_logging": self.config.get("debug_logging"),
+                "fast_upload_enabled": self.config.get("fast_upload_enabled"),
                 "proxy_type": self.config.get("proxy_type"),
                 "proxy_host": self.config.get("proxy_host"),
                 "proxy_port": self.config.get("proxy_port"),

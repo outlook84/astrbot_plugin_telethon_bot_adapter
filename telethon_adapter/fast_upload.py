@@ -34,6 +34,32 @@ from astrbot.api import logger
 def _debug_logging_enabled(client: Any) -> bool:
     return bool(getattr(client, "telethon_debug_logging", False))
 
+
+def _fast_upload_feature_enabled(client: Any) -> bool:
+    return bool(getattr(client, "telethon_fast_upload_enabled", True))
+
+
+def _log_debug(client: Any, message: str, *args: Any) -> None:
+    if _debug_logging_enabled(client):
+        logger.info(message, *args)
+
+
+def _log_upload_target_preprocess(
+    client: Any,
+    original_file: Any,
+    upload_target: Any,
+) -> None:
+    if upload_target is original_file:
+        return
+    _log_debug(
+        client,
+        "[Telethon][Debug] build_input_media: upload_target_preprocessed original=%r target_type=%s target_name=%r",
+        original_file,
+        type(upload_target).__name__,
+        getattr(upload_target, "name", None),
+    )
+
+
 try:
     from telethon import helpers, utils
     from telethon.client.uploads import _resize_photo_if_needed
@@ -65,15 +91,26 @@ else:
 
 def should_use_fast_upload(client: Any, file: Any) -> bool:
     if _FAST_UPLOAD_IMPORT_ERROR is not None:
-        if _debug_logging_enabled(client):
-            logger.info(
-                "[Telethon][Debug] fast_upload_unavailable: import_error=%r",
-                _FAST_UPLOAD_IMPORT_ERROR,
-            )
+        _log_debug(
+            client,
+            "[Telethon][Debug] fast_upload_unavailable: reason=import_error error=%r",
+            _FAST_UPLOAD_IMPORT_ERROR,
+        )
+        return False
+    if not _fast_upload_feature_enabled(client):
+        _log_debug(
+            client,
+            "[Telethon][Debug] fast_upload_unavailable: reason=disabled_by_config",
+        )
         return False
     if isinstance(file, pathlib.Path):
         file = str(file.absolute())
     if not isinstance(file, str) or not os.path.isfile(file):
+        _log_debug(
+            client,
+            "[Telethon][Debug] fast_upload_unavailable: reason=not_local_file file=%r",
+            file,
+        )
         return False
     # Fast upload depends on Telethon private client internals and must fail closed
     # when the runtime client does not expose the expected low-level hooks.
@@ -86,11 +123,11 @@ def should_use_fast_upload(client: Any, file: Any) -> bool:
     )
     missing_attrs = [attr for attr in required_attrs if not hasattr(client, attr)]
     if missing_attrs:
-        if _debug_logging_enabled(client):
-            logger.info(
-                "[Telethon][Debug] fast_upload_unavailable: missing_client_attrs=%s",
-                missing_attrs,
-            )
+        _log_debug(
+            client,
+            "[Telethon][Debug] fast_upload_unavailable: reason=missing_client_attrs attrs=%s",
+            missing_attrs,
+        )
         return False
     session = getattr(client, "session", None)
     enabled = bool(
@@ -98,13 +135,15 @@ def should_use_fast_upload(client: Any, file: Any) -> bool:
         and hasattr(session, "dc_id")
         and hasattr(session, "auth_key")
     )
-    if not enabled and _debug_logging_enabled(client):
-        logger.info(
-            "[Telethon][Debug] fast_upload_unavailable: invalid_session=%r",
+    if not enabled:
+        _log_debug(
+            client,
+            "[Telethon][Debug] fast_upload_unavailable: reason=invalid_session session=%r",
             session,
         )
-    if enabled and _debug_logging_enabled(client):
-        logger.info(
+    if enabled:
+        _log_debug(
+            client,
             "[Telethon][Debug] fast_upload_available: path=%s",
             file,
         )
@@ -213,6 +252,18 @@ if _FAST_UPLOAD_IMPORT_ERROR is None:
             )
             part_count = (file_size + part_size - 1) // part_size
             is_large = file_size > 10 * 1024 * 1024
+            _log_debug(
+                self.client,
+                "[Telethon][Debug] fast_upload_init: dc_id=%s file_id=%s file_size=%s part_size=%s part_count=%s "
+                "connection_count=%s is_large=%s",
+                self.dc_id,
+                file_id,
+                file_size,
+                part_size,
+                part_count,
+                connection_count,
+                is_large,
+            )
             self.senders = [
                 _UploadSender(
                     self.client,
@@ -230,8 +281,16 @@ if _FAST_UPLOAD_IMPORT_ERROR is None:
 
         async def upload(self, part: bytes) -> None:
             assert self.senders is not None
+            current_index = self.upload_ticker
             await self.senders[self.upload_ticker].enqueue_upload(part)
             self.upload_ticker = (self.upload_ticker + 1) % len(self.senders)
+            _log_debug(
+                self.client,
+                "[Telethon][Debug] fast_upload_part_enqueued: sender_index=%s bytes=%s next_sender_index=%s",
+                current_index,
+                len(part),
+                self.upload_ticker,
+            )
 
         async def finish_upload(self) -> None:
             if not self.senders:
@@ -258,18 +317,20 @@ async def _fast_upload_file(
         raise RuntimeError("fast upload is unavailable") from _FAST_UPLOAD_IMPORT_ERROR
 
     actual_file_size = file_size if file_size is not None else os.path.getsize(file)
-    if _debug_logging_enabled(client):
-        logger.info(
-            "[Telethon][Debug] fast_upload_start: path=%s size=%s",
-            file,
-            actual_file_size,
-        )
+    _log_debug(
+        client,
+        "[Telethon][Debug] fast_upload_start: path=%s size=%s",
+        file,
+        actual_file_size,
+    )
     file_id = helpers.generate_random_long()
     resolved_name = file_name or os.path.basename(file)
     transferrer = _ParallelTransferrer(client)
     part_size, part_count, is_large = await transferrer.init_upload(file_id, actual_file_size)
     hash_md5 = hashlib.md5()
     sent = 0
+    uploaded_parts = 0
+    uploaded_bytes = 0
 
     try:
         with open(file, "rb") as reader:
@@ -281,10 +342,21 @@ async def _fast_upload_file(
                 if not is_large:
                     hash_md5.update(part)
                 await transferrer.upload(part)
+                uploaded_parts += 1
+                uploaded_bytes += len(part)
                 if progress_callback:
                     await helpers._maybe_await(progress_callback(sent, actual_file_size))
     finally:
         await transferrer.finish_upload()
+
+    _log_debug(
+        client,
+        "[Telethon][Debug] fast_upload_complete: path=%s uploaded_parts=%s uploaded_bytes=%s is_large=%s",
+        file,
+        uploaded_parts,
+        uploaded_bytes,
+        is_large,
+    )
 
     if is_large:
         return types.InputFileBig(file_id, part_count, resolved_name)
@@ -312,6 +384,11 @@ async def build_input_media(
     file_to_media = getattr(client, "_file_to_media", None)
     fast_upload_enabled = should_use_fast_upload(client, file)
     if not fast_upload_enabled:
+        _log_debug(
+            client,
+            "[Telethon][Debug] build_input_media: using_telethon_default_uploader file=%r",
+            file,
+        )
         if not callable(file_to_media):
             if _FAST_UPLOAD_IMPORT_ERROR is not None:
                 raise RuntimeError("Telethon client does not expose _file_to_media")
@@ -336,6 +413,11 @@ async def build_input_media(
     if _FAST_UPLOAD_IMPORT_ERROR is not None:
         if not callable(file_to_media):
             raise RuntimeError("Telethon client does not expose _file_to_media")
+        _log_debug(
+            client,
+            "[Telethon][Debug] build_input_media: fast_upload_requested_but_falling_back file=%r reason=import_error",
+            file,
+        )
         return await file_to_media(
             file,
             force_document=force_document,
@@ -388,18 +470,39 @@ async def build_input_media(
         file_handle = file
     elif not isinstance(file, str) or os.path.isfile(file):
         upload_target = _resize_photo_if_needed(file, as_image)
+        _log_upload_target_preprocess(client, file, upload_target)
         if (
             should_use_fast_upload(client, upload_target)
             and isinstance(upload_target, str)
             and os.path.isfile(upload_target)
         ):
+            _log_debug(
+                client,
+                "[Telethon][Debug] build_input_media: using_fast_upload file=%r file_size=%r",
+                upload_target,
+                file_size,
+            )
             file_handle = await _fast_upload_file(
                 client,
                 upload_target,
                 file_size=file_size,
                 progress_callback=progress_callback,
             )
+            _log_debug(
+                client,
+                "[Telethon][Debug] build_input_media: fast_upload_produced_input_file file=%r uploaded_type=%s",
+                upload_target,
+                type(file_handle).__name__,
+            )
         else:
+            if upload_target is not file:
+                _log_debug(
+                    client,
+                    "[Telethon][Debug] build_input_media: fast_upload_skipped_after_preprocess original=%r target_type=%s target_name=%r",
+                    file,
+                    type(upload_target).__name__,
+                    getattr(upload_target, "name", None),
+                )
             file_handle = await client.upload_file(
                 upload_target,
                 file_size=file_size,

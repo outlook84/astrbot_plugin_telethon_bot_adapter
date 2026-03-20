@@ -264,6 +264,7 @@ class ConfigValidationTests(unittest.TestCase):
         self.assertIn("bot_token", config_module.DEFAULT_CONFIG_TEMPLATE)
         self.assertNotIn("session_string", config_module.DEFAULT_CONFIG_TEMPLATE)
         self.assertEqual(config_module.DEFAULT_CONFIG_TEMPLATE["menu_button_mode"], "commands")
+        self.assertFalse(config_module.DEFAULT_CONFIG_TEMPLATE["fast_upload_enabled"])
 
     def test_adapter_init_parses_bot_config(self):
         _, adapter_module = _load_modules()
@@ -274,6 +275,7 @@ class ConfigValidationTests(unittest.TestCase):
                 "bot_token": "123:abc",
                 "reply_to_self_triggers_command": "true",
                 "debug_logging": "true",
+                "fast_upload_enabled": "false",
                 "telethon_command_register": "false",
                 "telethon_command_auto_refresh": "false",
                 "telethon_command_register_interval": "123",
@@ -286,6 +288,7 @@ class ConfigValidationTests(unittest.TestCase):
         self.assertEqual(adapter.bot_token, "123:abc")
         self.assertTrue(adapter.reply_to_self_triggers_command)
         self.assertTrue(adapter.debug_logging)
+        self.assertFalse(adapter.fast_upload_enabled)
         self.assertFalse(adapter.sync_bot_commands)
         self.assertFalse(adapter.command_auto_refresh)
         self.assertEqual(adapter.command_refresh_interval, 123)

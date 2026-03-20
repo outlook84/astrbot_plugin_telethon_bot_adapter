@@ -1,4 +1,5 @@
 import importlib.util
+import io
 import sys
 import types
 import unittest
@@ -14,10 +15,11 @@ def _install_astrbot_stubs() -> None:
 
     class _Logger:
         def __init__(self) -> None:
+            self.infos = []
             self.warnings = []
 
         def info(self, *args, **kwargs):
-            return None
+            self.infos.append((args, kwargs))
 
         def warning(self, *args, **kwargs):
             self.warnings.append((args, kwargs))
@@ -119,6 +121,24 @@ class _FakeSender:
 
 
 class FastUploadTests(unittest.IsolatedAsyncioTestCase):
+    def test_should_use_fast_upload_returns_false_when_disabled_by_config(self):
+        module = _load_fast_upload_module()
+        client = types.SimpleNamespace(
+            telethon_debug_logging=True,
+            telethon_fast_upload_enabled=False,
+            session=types.SimpleNamespace(dc_id=1, auth_key=b"key"),
+            _call=object(),
+            _get_dc=object(),
+            _connection=object(),
+            _log=object(),
+        )
+
+        enabled = module.should_use_fast_upload(client, __file__)
+
+        self.assertFalse(enabled)
+        self.assertTrue(module.logger.infos)
+        self.assertIn("reason=disabled_by_config", module.logger.infos[-1][0][0])
+
     async def test_finish_upload_waits_for_all_disconnects_and_logs_errors(self):
         module = _load_fast_upload_module()
         transferrer = module._ParallelTransferrer(client=types.SimpleNamespace(session=types.SimpleNamespace(dc_id=1, auth_key=None)))
@@ -132,6 +152,22 @@ class FastUploadTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(sender_fail.disconnected)
         self.assertIsNone(transferrer.senders)
         self.assertEqual(len(module.logger.warnings), 1)
+
+    def test_log_upload_target_preprocess_describes_memory_target(self):
+        module = _load_fast_upload_module()
+        client = types.SimpleNamespace(telethon_debug_logging=True)
+        buffer = io.BytesIO(b"data")
+        buffer.name = "a.jpg"
+
+        module._log_upload_target_preprocess(client, "/tmp/source.jpg", buffer)
+
+        self.assertTrue(module.logger.infos)
+        message = module.logger.infos[-1][0][0]
+        args = module.logger.infos[-1][0][1:]
+        self.assertIn("upload_target_preprocessed", message)
+        self.assertEqual(args[0], "/tmp/source.jpg")
+        self.assertEqual(args[1], "BytesIO")
+        self.assertEqual(args[2], "a.jpg")
 
 
 if __name__ == "__main__":

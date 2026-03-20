@@ -22,6 +22,7 @@ FIELD_SPECS = {
     "download_incoming_media": {"type": "bool"},
     "incoming_media_ttl_seconds": {"type": "float"},
     "debug_logging": {"type": "bool"},
+    "fast_upload_enabled": {"type": "bool"},
     "telethon_command_auto_refresh": {
         "type": "bool",
         "invisible": True,
@@ -80,6 +81,7 @@ DEFAULT_CONFIG_TEMPLATE = {
     "download_incoming_media": True,
     "incoming_media_ttl_seconds": 600.0,
     "debug_logging": False,
+    "fast_upload_enabled": False,
     "telethon_command_register": True,
     "telethon_command_auto_refresh": True,
     "telethon_command_register_interval": 300,
@@ -195,6 +197,9 @@ def apply_config(adapter: Any) -> None:
     )
     adapter.debug_logging = parse_bool(
         adapter.config.get("debug_logging"), False
+    )
+    adapter.fast_upload_enabled = parse_bool(
+        adapter.config.get("fast_upload_enabled"), False
     )
     adapter.sync_bot_commands = parse_bool(
         _first_config_value(adapter.config, "telethon_command_register", "sync_bot_commands"),
