@@ -12,6 +12,7 @@ A Telegram Bot adapter for AstrBot built on top of Telethon.
 ## Notes
 
 - The adapter reports platform type `telethon_bot`.
+- `fast_upload_enabled` is disabled by default. It only applies to local file uploads; when enabled, uploads prefer the Telethon fast upload parallel path. It relies on Telethon private internals and increases concurrent connections and resource usage, so Telethon upgrades, unstable networks, or stricter account risk controls may lead to upload failures, throttling, or behavior changes.
 - Platform-level streaming display is unsupported. If AstrBot has `provider_settings.streaming_response` enabled, please disable it for this adapter.
 
 ## Installation
@@ -44,6 +45,7 @@ Add a platform adapter in AstrBot and choose `telethon_bot`, then fill in:
 - `telethon_command_register`: whether to automatically sync registered AstrBot commands to Telegram bot commands after connect
 - `menu_button_mode`: `disabled` / `commands`, controls the Telegram private chat menu button
 - `download_incoming_media`: whether to download incoming media
+- `fast_upload_enabled`: whether to enable Telethon fast upload parallel uploading, default `false`. It only applies to local file path uploads; when enabled, the adapter will prefer fast upload and automatically fall back to Telethon's default uploader when conditions are not met
 - `incoming_media_ttl_seconds`: local TTL for downloaded incoming media
 - `telethon_media_group_timeout`: media group debounce delay
 - `telethon_media_group_max_wait`: maximum media group wait time
